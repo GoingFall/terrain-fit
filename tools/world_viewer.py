@@ -259,7 +259,7 @@ uniform sampler2D uAtlas;
 uniform float uDetailDist;
 uniform vec2 uRes;
 uniform vec3 uEye;
-uniform float uYaw, uPitch, uFov, uSnow, uNoWater, uDbg, uFade, uBelow;
+uniform float uYaw, uPitch, uFov, uSnow, uNoWater, uDbg, uFade, uBelow, uDbgId;
 uniform vec2 uMapSize;
 
 const float HMIN=-64.0, HSCALE=384.0;
@@ -364,7 +364,7 @@ void main(){
     if(hitT < uDetailDist){
       vec3 hp = uEye + dir*hitT;
       float slot = idb*2.0 + (row > 0.5 ? 1.0 : 0.0);
-      vec2 faceUV = (row > 0.5) ? fract(vec2(hp.x + hp.z, hp.y)) : fract(hp.xz);
+      vec2 faceUV = (row > 0.5) ? fract(vec2(hp.x + hp.z, -hp.y)) : fract(hp.xz);
       faceUV = clamp(faceUV, 0.04, 0.96);                 // keep off the tile border
       vec2 cell = vec2(mod(slot, 16.0), floor(slot / 16.0));
       vec2 auv = (cell + faceUV) / 16.0;
@@ -385,6 +385,11 @@ void main(){
     float border = smoothstep(0.0, 0.016, toEdge);
     col = mix(sky, col, border * (1.0 - isEdge * 0.85 * uFade));
     col = mix(col, sky, clamp(1.0 - exp(-hitT*0.00035), 0.0, 0.88));
+  }
+  if(uDbg > 2.5){                    // test which palette row v=0.25 / v=0.75 hits
+    float vv = (gl_FragCoord.x/uRes.x < 0.5) ? 0.25 : 0.75;
+    gl_FragColor = vec4(texture2D(uPal, vec2((uDbgId + 0.5)/256.0, vv)).rgb, 1.0);
+    return;
   }
   if(uDbg > 0.5){
     // debug: red = terrain hit depth, green = water depth, black = sky
@@ -452,7 +457,8 @@ function start(){
     snow: gl.getUniformLocation(sceneP,'uSnow'), nowater: gl.getUniformLocation(sceneP,'uNoWater'),
     dbg: gl.getUniformLocation(sceneP,'uDbg'), fade: gl.getUniformLocation(sceneP,'uFade'), id: gl.getUniformLocation(sceneP,'uId'),
     pal: gl.getUniformLocation(sceneP,'uPal'), atl: gl.getUniformLocation(sceneP,'uAtlas'),
-    detailDist: gl.getUniformLocation(sceneP,'uDetailDist'), below: gl.getUniformLocation(sceneP,'uBelow'), mapSize: gl.getUniformLocation(sceneP,'uMapSize'),
+    detailDist: gl.getUniformLocation(sceneP,'uDetailDist'), below: gl.getUniformLocation(sceneP,'uBelow'),
+    dbgId: gl.getUniformLocation(sceneP,'uDbgId'), mapSize: gl.getUniformLocation(sceneP,'uMapSize'),
   };
   ub = { fb: gl.getUniformLocation(blitP,'uFB'), res: gl.getUniformLocation(blitP,'uRes') };
 
@@ -644,7 +650,9 @@ function frame(){
   gl.uniform1f(u.detailDist, 240.0);
   gl.uniform1f(u.below, (cam.y < heightAt(cam.x, cam.z)) ? 1.0 : 0.0);
   gl.uniform1f(u.nowater, new URLSearchParams(location.search).has('nowater') ? 1.0 : 0.0);
-  gl.uniform1f(u.dbg, new URLSearchParams(location.search).has('dbg') ? 1.0 : 0.0);
+  var _dbg = new URLSearchParams(location.search).get('dbg');
+  gl.uniform1f(u.dbg, _dbg ? parseFloat(_dbg) : 0.0);
+  gl.uniform1f(u.dbgId, __GID__);
   gl.uniform1f(u.fade, new URLSearchParams(location.search).has('fade') ? 1.0 : 0.0);
   gl.uniform2f(u.mapSize, MAPW, MAPH);
 
@@ -766,12 +774,19 @@ def main() -> int:
     atlas_image().save(atlbio, format="PNG", optimize=True)
     atlas_b64 = base64.b64encode(atlbio.getvalue()).decode("ascii")
 
+    import json as _json
+    _pal = _json.loads((Path(__file__).parent.parent / "_palette" / "palette.json")
+                       .read_text(encoding="utf-8"))
+    _names = sorted(_pal["colors"])
+    gid = _names.index("grass_block") if "grass_block" in _names else 0
+
     bx, bz, yaw = best_view(ground, water)
     eye_y = float(ground[bz, bx]) + 12.0
     html = (HTML.replace("__B64__", b64)
                 .replace("__IDB64__", id_b64)
                 .replace("__PALB64__", pal_b64)
                 .replace("__ATLB64__", atlas_b64)
+                .replace("__GID__", str(gid))
                 .replace("__MIPS__", "[]")
                 .replace("__SNOW__", f"{float(np.percentile(ground, 92)):.1f}")
                 .replace("__NW__", str(ground.shape[1]))
