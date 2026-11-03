@@ -33,6 +33,7 @@ measurements. This repo is the measuring + viewing half of that loop.
 | **Interactive single-file 3D viewer** (WebGL1, no server, no dependencies) | `tools/world_viewer.py` |
 | Real per-block colours from vanilla 1.20.1 textures (JEI-style: sample sprite + biome tint) | `tools/block_palette.py` |
 | **Terrain metrics panel** (relief, slope percentiles, water/snow cover, ridge density) + JSON export | `tools/terrain_metrics.py` |
+| **Metric distance + batch table** (compare maps numerically, no images) | `tools/terrain_metrics.py --compare`, `tools/batch_metrics.py` |
 | Parameter search against a target's metrics | `tools/fit_metrics.py` |
 | Procedural terrain preview (parameters → picture, no game needed) | `tools/terrain_preview.py` |
 
@@ -99,8 +100,26 @@ heat map), `?fade=1` (soften the edge of missing data).
 | `snow_line` | median height of snow-covered columns |
 | `ridge_per_km2` | local maxima of the surface *smoothed* with radius 5 (counting raw 1-block maxima is meaningless) |
 
-The viewer shows the same summary in its HUD, and `--metrics-json` writes it out, so a reference
-map and a generated one can be compared numerically instead of by eye.
+The viewer shows the same summary in its HUD, and `--metrics-json` writes it out.
+
+### Comparing maps numerically
+
+```bash
+# distance between two metric files (0 = identical)
+python tools/terrain_metrics.py x --compare reference.json generated.json
+# -> distance = 1.3528, plus per-metric residuals sorted by size
+
+# a whole folder of saves -> one table (JSON + TSV) for batch runs
+python tools/batch_metrics.py "<saves-dir>" --region r.0.0 --out table.json --tsv table.tsv
+```
+
+The distance is a weighted mean of `|ln(a/b)|` over the metrics, so it is scale-relative and every
+metric contributes comparably. The residuals say *which* dimension is off (water cover? cliff
+share? ridge density?), which is what a parameter search needs to steer on. Images are for humans;
+this table is what a program should compare.
+
+Current weights: `slope.p99` 1.5, `relief.span` / `slope.p50` / `slope.p90` / `slope.gt2_pct` /
+`slope.gt4_pct` / `cover.water_pct` / `ridge_per_km2` 1.0, `cover.snow_pct` / `slope.flat_pct` 0.5.
 
 ## Findings worth keeping
 

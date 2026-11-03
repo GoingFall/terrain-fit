@@ -106,13 +106,69 @@ def summary_line(m: dict) -> str:
             f" | ridges {m['ridge_per_km2']:.0f}/km2")
 
 
+# ---------------------------------------------------------------- comparison
+
+WEIGHTS = {
+    "relief.span": 1.0,
+    "slope.p50": 1.0,
+    "slope.p90": 1.0,
+    "slope.p99": 1.5,          # the tail is what makes hand-made terrain look hand-made
+    "slope.gt2_pct": 1.0,
+    "slope.gt4_pct": 1.0,
+    "slope.flat_pct": 0.5,
+    "cover.water_pct": 1.0,
+    "cover.snow_pct": 0.5,
+    "ridge_per_km2": 1.0,
+}
+EPS = 0.05
+
+
+def _get(m: dict, path: str) -> float:
+    cur = m
+    for part in path.split("."):
+        cur = cur[part]
+    return float(cur)
+
+
+def compare(a: dict, b: dict) -> dict:
+    """Per-metric log-ratio and a single weighted distance (0 = identical)."""
+    rows, total, wsum = {}, 0.0, 0.0
+    for key, w in WEIGHTS.items():
+        va, vb = _get(a, key), _get(b, key)
+        if va is None or vb is None:
+            continue
+        la = np.log(max(va, EPS))
+        lb = np.log(max(vb, EPS))
+        d = abs(la - lb)
+        rows[key] = {"a": round(va, 4), "b": round(vb, 4),
+                     "log_ratio": round(float(la - lb), 4), "weight": w}
+        total += w * d
+        wsum += w
+    return {"distance": round(float(total / max(wsum, 1e-9)), 4),
+            "residuals": dict(sorted(rows.items(), key=lambda kv: -abs(kv[1]["log_ratio"])))}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("world")
     ap.add_argument("--region")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--json", dest="json_out")
+    ap.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"),
+                    help="compare two metrics files instead of measuring a world")
     args = ap.parse_args()
+
+    if args.compare:
+        a = json.loads(Path(args.compare[0]).read_text(encoding="utf-8"))
+        b = json.loads(Path(args.compare[1]).read_text(encoding="utf-8"))
+        res = compare(a, b)
+        print(f"distance = {res['distance']:.4f}   (0 = identical)")
+        for k, v in res["residuals"].items():
+            print(f"  {k:20} {v['a']:>10.3f} vs {v['b']:>10.3f}   "
+                  f"log-ratio {v['log_ratio']:+.3f}  w={v['weight']}")
+        if args.json_out:
+            Path(args.json_out).write_text(json.dumps(res, indent=2), encoding="utf-8")
+        return 0
 
     ground, water, canopy, flags, sid, x0, z0 = collect_layers(
         Path(args.world), args.region, workers=args.workers, fill_missing=False)
