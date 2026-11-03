@@ -68,6 +68,14 @@ class Params2:
     erosion_freq: float = 3.2
     erosion_floor: float = 0.30
 
+    # directional valley: the reference is strongly anisotropic (85:1 at 146 deg), which isotropic
+    # noise cannot produce; a single wandering valley axis fixes that with 2 extra parameters
+    valley_angle_deg: float = 146.0
+    valley_depth: float = 30.0
+    valley_width: float = 0.10
+    valley_meander: float = 0.06
+    valley_meander_freq: float = 2.0
+
     # rivers
     river_freq: float = 2.6
     river_depth: float = 16.0
@@ -127,6 +135,18 @@ def build2(p: Params2):
     spike_raw = noise2d(n, n, p.spike_freq, rng, octaves=2) * 0.5 + 0.5
     spike = np.clip((spike_raw - p.spike_threshold) / max(1.0 - p.spike_threshold, 1e-3), 0.0, 1.0)
     h = h + hill * spike * p.spike_amp          # RTG: spikes only where hills are
+
+    # --- directional valley: rotate into (u, v), then carve a wandering band around v = 0
+    if p.valley_depth != 0.0:
+        a = math.radians(p.valley_angle_deg)
+        xs = (np.arange(n, dtype=np.float32) + 0.5) / n
+        zs = (np.arange(n, dtype=np.float32) + 0.5) / n
+        U = xs[None, :] * math.cos(a) + zs[:, None] * math.sin(a)
+        V = -xs[None, :] * math.sin(a) + zs[:, None] * math.cos(a)
+        prof = noise2d(1, n, p.valley_meander_freq, rng, octaves=2)[0]
+        centre = p.valley_meander * prof[np.clip((U * (n - 1)).astype(np.int32), 0, n - 1)]
+        band = 1.0 - _smooth(np.clip(np.abs(V - centre) / max(p.valley_width, 1e-3), 0.0, 1.0))
+        h = h - band * p.valley_depth
 
     # --- rivers: distance-to-contour carve, falloff with width
     rv = noise2d(n, n, p.river_freq, rng, octaves=2)
