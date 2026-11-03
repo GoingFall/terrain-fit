@@ -26,6 +26,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
 from world_layers import collect_layers  # noqa: E402
+from terrain_metrics import compute as compute_metrics, summary_line  # noqa: E402
 
 HMIN, HSCALE = -64.0, 384.0
 
@@ -205,7 +206,7 @@ HTML = """<!doctype html>
  canvas{display:block;width:100vw;height:100vh;cursor:grab}
  canvas.drag{cursor:grabbing}
  #hud{position:fixed;left:12px;top:12px;background:rgba(12,12,14,.72);padding:10px 12px;border-radius:8px;
-      pointer-events:none;line-height:1.7;font-variant-numeric:tabular-nums}
+      pointer-events:none;line-height:1.6;font-variant-numeric:tabular-nums;max-width:min(660px,70vw)}
  #hud b{color:#8fd3ff;font-weight:600}
  #hud .gpu{color:#9cc;font-size:11px;display:block;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  #tip{position:fixed;left:12px;bottom:12px;background:rgba(12,12,14,.72);padding:8px 12px;border-radius:8px;
@@ -223,6 +224,7 @@ HTML = """<!doctype html>
 <script>
 const TEXW = __NW__, TEXH = __NH__;               // map extent (= texture size)
 const MAPW = __MAPW__, MAPH = __MAPH__;           // real map extent in blocks
+const METRICS = "__METRICS__";
 const HOME = {x:__EX__, z:__EZ__, y:__EY__, yaw:__YAW__, pitch:-12};
 function loadTex(b64){
   return new Promise((res, rej) => {
@@ -697,6 +699,7 @@ function updateHUD(){
     `${collide ? '' : '<span style="color:#fc6">自由飞行</span> · '}yaw ${(cam.yaw*180/Math.PI).toFixed(0)}° · pitch ${cam.pitch.toFixed(0)}° · fov ${cam.fov.toFixed(0)}°<br>`+
     `ground ${perf.gh > -63 ? perf.gh.toFixed(0) : '—'} (floor ${(perf.gh > -63 ? perf.gh + 1.6 : 40).toFixed(0)})<br>`+
     `<span style="color:#8a8">${perf.fps.toFixed(0)} fps</span> · ${perf.fw}×${perf.fh} · safe-step<br>`+
+    `<span style="color:#9ac;font-size:11px;white-space:normal">${METRICS}</span><br>` +
     `<span class="gpu">${GPU}</span>` +
     (perf.fboOK ? '' : ' · <span style="color:#f88">no-FBO fallback</span>');
 }
@@ -711,6 +714,7 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--out", default="preview/viewer.html")
     ap.add_argument("--name")
+    ap.add_argument("--metrics-json", help="write the terrain metrics as JSON")
     args = ap.parse_args()
 
     ground, water, canopy, flags, sid, x0, z0 = collect_layers(
@@ -756,6 +760,13 @@ def main() -> int:
     sid = np.where(hole, np.uint8(255), sid)
     print(f"   kept {best_size}/{int(per.sum())} valid chunks (largest island)")
 
+    metrics = compute_metrics(ground, water, flags)
+    print("   " + summary_line(metrics))
+    if args.metrics_json:
+        import json as _j
+        Path(args.metrics_json).write_text(_j.dumps(metrics, indent=2), encoding="utf-8")
+        print(f"   metrics -> {args.metrics_json}")
+
     orig_shape = ground.shape
     img = encode(ground, water, flags)
     bio = io.BytesIO()
@@ -797,7 +808,8 @@ def main() -> int:
                 .replace("__EZ__", f"{bz * 1.0:.1f}")
                 .replace("__EY__", f"{eye_y:.1f}")
                 .replace("__YAW__", f"{math.radians(yaw):.5f}")
-                .replace("__NAME__", args.name or Path(args.world).name))
+                .replace("__NAME__", args.name or Path(args.world).name)
+                .replace("__METRICS__", summary_line(metrics)))
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -32,7 +32,8 @@ measurements. This repo is the measuring + viewing half of that loop.
 | Render a save as a still image (same framing/lighting as the viewer) | `tools/world_preview.py` |
 | **Interactive single-file 3D viewer** (WebGL1, no server, no dependencies) | `tools/world_viewer.py` |
 | Real per-block colours from vanilla 1.20.1 textures (JEI-style: sample sprite + biome tint) | `tools/block_palette.py` |
-| Terrain statistics + parameter search against a target map | `tools/fit_metrics.py` |
+| **Terrain metrics panel** (relief, slope percentiles, water/snow cover, ridge density) + JSON export | `tools/terrain_metrics.py` |
+| Parameter search against a target's metrics | `tools/fit_metrics.py` |
 | Procedural terrain preview (parameters → picture, no game needed) | `tools/terrain_preview.py` |
 
 ## Quick start
@@ -45,6 +46,7 @@ python tools/world_viewer.py "<path-to-save>" --out preview/viewer.html
 python tools/world_viewer.py "<path-to-save>" --region r.0.0 --out preview/region.html
 
 # 2) measure a map
+python tools/terrain_metrics.py "<path-to-save>" --region r.0.0 --json metrics.json
 python tools/world_heightmap.py "<path-to-save>" -o heightmap.png --stats
 python tools/world_layers.py "<path-to-save>" r.0.0        # layers + snow/ice/canopy coverage
 
@@ -85,6 +87,21 @@ heat map), `?fade=1` (soften the edge of missing data).
 * only the largest connected island of valid chunks is loaded — map authors ring their work with
   empty chunks, and anything outside that ring is not part of the map
 
+## Metrics (the evaluator's yardstick)
+
+`tools/terrain_metrics.py` computes, from the same layers the viewer uses:
+
+| Metric | Meaning |
+|---|---|
+| `relief.{min,max,span,mean}` | height range of the valid columns |
+| `slope.{p50,p90,p99,max,gt2_pct,gt4_pct,flat_pct}` | gradient magnitude distribution (blocks per block) |
+| `cover.{water,snow,ice,canopy}_pct` | surface composition |
+| `snow_line` | median height of snow-covered columns |
+| `ridge_per_km2` | local maxima of the surface *smoothed* with radius 5 (counting raw 1-block maxima is meaningless) |
+
+The viewer shows the same summary in its HUD, and `--metrics-json` writes it out, so a reference
+map and a generated one can be compared numerically instead of by eye.
+
 ## Findings worth keeping
 
 * **Hand-made maps are smooth, procedural ones are spiky.** Measured on a reference map: slope
@@ -113,8 +130,9 @@ standard library; large maps scale with CPU cores (`--workers N`).
 
 ## Roadmap
 
-1. **Multi-scale terrain fitting**: gradient spectra at several blur radii + ridge density, then a
-   search that keeps both "how steep" and "how busy" in target range.
+1. **Multi-scale terrain fitting**: gradient spectra at several blur radii (the single-scale
+   percentile fit is known to fail, see below) plus ridge density, then a search that keeps both
+   "how steep" and "how busy" inside the target range.
 2. **Datapack export**: turn the fitted parameters into a `noise_settings` JSON that runs in-game
    (1.20.1), then verify the real terrain against the preview with `world_heightmap.py`.
 3. **Temporal denoising (TAA)** in the viewer to remove the residual grazing-angle noise.
