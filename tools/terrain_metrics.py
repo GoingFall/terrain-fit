@@ -55,6 +55,60 @@ def ridge_density(h: np.ndarray, valid: np.ndarray, radius: int = 5) -> float:
     return float(crest.sum() / area_km2) if area_km2 else 0.0
 
 
+def spectrum(ground: np.ndarray, valid: np.ndarray, max_side: int = 1024) -> dict:
+    """Radial power spectrum of the height field, binned by wavelength.
+
+    Answers "how busy is the surface at each scale" — the thing slope percentiles cannot see.
+    Returns energy share per band plus the log-log slope of power vs frequency.
+    """
+    ys, xs = np.where(valid)
+    if xs.size < 64:
+        return {}
+    y0, y1 = ys.min(), ys.max() + 1
+    x0, x1 = xs.min(), xs.max() + 1
+    crop = ground[y0:y1, x0:x1].astype(np.float64)
+    mask = valid[y0:y1, x0:x1]
+    crop = np.where(mask, crop, float(np.median(crop[mask])))
+    crop -= crop.mean()
+    h, w = crop.shape
+    step = max(1, int(np.ceil(max(h, w) / max_side)))
+    crop = crop[::step, ::step]
+    h, w = crop.shape
+    win = np.outer(np.hanning(h), np.hanning(w))
+    spec = np.abs(np.fft.rfft2(crop * win)) ** 2
+    fy = np.fft.fftfreq(h)[:, None]
+    fx = np.fft.rfftfreq(w)[None, :]
+    freq = np.hypot(fy, fx)                             # cycles per block
+    with np.errstate(divide="ignore"):
+        wl = 1.0 / freq
+    total = spec.sum() or 1.0
+
+    edges = [(None, 512), (512, 256), (256, 128), (128, 64), (64, 32),
+             (32, 16), (16, 8), (8, 0)]
+    bands = {}
+    for lo, hi in edges:
+        if lo is None:
+            m = wl >= hi
+            name = f">={hi}"
+        elif hi == 0:
+            m = wl < lo
+            name = f"<{lo}"
+        else:
+            m = (wl >= hi) & (wl < lo)
+            name = f"{hi}-{lo}"
+        bands[name] = float(spec[m].sum() / total * 100)
+
+    # log-log slope over the resolved range (exclude DC and the noise floor)
+    sel = (freq > 1.0 / 512) & (freq < 1.0 / 8)
+    if sel.any():
+        lf = np.log10(freq[sel])
+        lp = np.log10(np.maximum(spec[sel], 1e-20))
+        slope = float(np.polyfit(lf, lp, 1)[0])
+    else:
+        slope = 0.0
+    return {"bands_pct": bands, "spectral_slope": slope}
+
+
 def compute(ground: np.ndarray, water: np.ndarray, flags: np.ndarray,
             valid: np.ndarray | None = None) -> dict:
     if valid is None:
@@ -94,6 +148,7 @@ def compute(ground: np.ndarray, water: np.ndarray, flags: np.ndarray,
         },
         "snow_line": float(np.median(ground[snow])) if snow.any() else None,
         "ridge_per_km2": ridge_density(ground, valid),
+        "spectrum": spectrum(ground, valid),
     }
 
 
@@ -119,8 +174,15 @@ WEIGHTS = {
     "cover.water_pct": 1.0,
     "cover.snow_pct": 0.5,
     "ridge_per_km2": 1.0,
+    # radial spectrum: the target has almost no energy below 128 blocks, and a fit that adds
+    # 64-128 "small ridges" looks busy even when every slope percentile matches
+    "spectrum.bands_pct.256-512": 0.8,
+    "spectrum.bands_pct.128-256": 0.8,
+    "spectrum.bands_pct.64-128": 1.0,
+    "spectrum.bands_pct.32-64": 1.0,
 }
 EPS = 0.05
+EPS_PCT = 0.5          # for percentage metrics that can be near zero
 
 
 def _get(m: dict, path: str) -> float:
@@ -134,11 +196,15 @@ def compare(a: dict, b: dict) -> dict:
     """Per-metric log-ratio and a single weighted distance (0 = identical)."""
     rows, total, wsum = {}, 0.0, 0.0
     for key, w in WEIGHTS.items():
-        va, vb = _get(a, key), _get(b, key)
+        try:
+            va, vb = _get(a, key), _get(b, key)
+        except (KeyError, TypeError):
+            continue                     # metric missing on one side (older JSON) -> skip
         if va is None or vb is None:
             continue
-        la = np.log(max(va, EPS))
-        lb = np.log(max(vb, EPS))
+        eps = EPS_PCT if "bands_pct" in key else EPS
+        la = np.log(max(va, eps))
+        lb = np.log(max(vb, eps))
         d = abs(la - lb)
         rows[key] = {"a": round(va, 4), "b": round(vb, 4),
                      "log_ratio": round(float(la - lb), 4), "weight": w}
@@ -181,6 +247,10 @@ def main() -> int:
         print(f"  {group}: " + ", ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}"
                                          for k, v in m[group].items()))
     print(f"  snow_line={m['snow_line']}  ridge_per_km2={m['ridge_per_km2']:.1f}")
+    if m.get("spectrum"):
+        sp = m["spectrum"]
+        print(f"  spectrum: slope {sp['spectral_slope']:+.3f}")
+        print("    " + "  ".join(f"{k}:{v:.1f}%" for k, v in sp["bands_pct"].items()))
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(m, indent=2), encoding="utf-8")
