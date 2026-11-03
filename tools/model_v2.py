@@ -44,6 +44,11 @@ class Params2:
     mountain_threshold: float = 0.20
     mountain_softness: float = 0.30
 
+    # massif: the 128-block band between "continent" and "crest" (the reference has ~38% of its
+    # spectral energy here and the previous model could not express it)
+    massif_freq: float = 4.0           # 512 / 4 = 128 blocks
+    massif_amp: float = 40.0
+
     # crests inside the mountains
     ridge_freq: float = 8.5            # 512 / 8.5 = 60 blocks between crests
     ridge_amp: float = 55.0
@@ -70,6 +75,7 @@ class Params2:
 
     # water / snow (metrics only)
     sea_level: float = 74.0
+    water_quantile: float = 0.0        # >0: sea level = this height quantile (overrides sea_level)
     snow_quantile: float = 0.40
 
     # camera for the preview render
@@ -98,6 +104,10 @@ def build2(p: Params2):
 
     e = noise2d(n, n, p.erosion_freq, rng, octaves=2) * 0.5 + 0.5
     erosion = p.erosion_floor + (1.0 - p.erosion_floor) * _smooth(e)
+
+    # --- massif band: broad mountain bodies, gated by the mountain mask
+    ms = noise2d(n, n, p.massif_freq, rng, octaves=2)
+    h = h + p.massif_amp * ms * mountain
 
     # --- crests inside mountains (folded ridge, several octaves)
     ridge = np.zeros((n, n), dtype=np.float32)
@@ -129,7 +139,8 @@ def build2(p: Params2):
 
 def masks2(h: np.ndarray, p: Params2):
     """Same triple the world reader produces: ground / water / flags(bit0=snow)."""
-    water = np.where(h < p.sea_level, p.sea_level, -1e4).astype(np.float32)
+    sea = float(np.quantile(h, p.water_quantile)) if p.water_quantile > 0 else p.sea_level
+    water = np.where(h < sea, sea, -1e4).astype(np.float32)
     flags = np.zeros(h.shape, dtype=np.uint8)
     thr = float(np.quantile(h, p.snow_quantile)) if p.snow_quantile > 0 else 1e9
     flags[h > thr] = 1

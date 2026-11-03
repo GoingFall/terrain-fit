@@ -49,11 +49,13 @@ RANGES = {
 RANGES_V2 = {
     "base_level": (80.0, 140.0),
     "relief_macro": (150.0, 420.0),
-    "continent_freq": (0.7, 2.0),
+    "continent_freq": (0.8, 4.0),
     "continent_gamma": (1.0, 3.0),
     "mountain_freq": (1.2, 3.5),
     "mountain_threshold": (-0.30, 0.50),
     "mountain_softness": (0.10, 0.60),
+    "massif_freq": (2.0, 9.0),
+    "massif_amp": (0.0, 90.0),
     "ridge_freq": (3.0, 14.0),
     "ridge_amp": (10.0, 120.0),
     "ridge_octaves": (1, 3),
@@ -69,6 +71,7 @@ RANGES_V2 = {
     "river_depth": (3.0, 40.0),
     "river_width": (0.03, 0.20),
     "sea_level": (55.0, 95.0),
+    "water_quantile": (0.0, 0.35),
     "snow_quantile": (0.05, 0.95),
 }
 
