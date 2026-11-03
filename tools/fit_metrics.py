@@ -1,69 +1,134 @@
 #!/usr/bin/env python3
-"""Measure a procedural build with the same slope yardstick used on real maps.
+"""Single-target fitting: search procedural terrain parameters against a reference map's metrics.
 
-Target (from the hand-built 拉斐丽 map, region r.0.0):
-  p50 0.71  p90 1.50  p99 2.50  max 9.0  slope>2 2.3%  slope>4 0.1%  relief span 234
+The generator's heightfield is turned into the same (ground, water, flags) triple the world reader
+produces, so `terrain_metrics.compute()` and `compare()` apply unchanged — the search minimises the
+exact distance the evaluator uses.
 
 Usage:
-  python fit_metrics.py                      # current valley preset
-  python fit_metrics.py ridge_octaves=3 slope_limit=4 mid_amp=25
+  # one build, report the distance + residuals
+  python fit_metrics.py --target reference.json --set ridge_amp=170 basin_radius=0.5
+
+  # random search, keep the best parameter set
+  python fit_metrics.py --target reference.json --random 40 --seed 1 --best best.json
 """
 from __future__ import annotations
 
+import argparse
+import json
+import random
 import sys
+from dataclasses import asdict, fields
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from terrain_metrics import compare, compute  # noqa: E402
 from terrain_preview import Params, build  # noqa: E402
 
-TARGET = {"p50": 0.71, "p90": 1.50, "p99": 2.50, "max": 9.0, "gt2": 2.3, "gt4": 0.1, "span": 234}
+RANGES = {
+    "ridge_amp": (60.0, 260.0),
+    "ridge_sharp": (1.0, 2.6),
+    "ridge_octaves": (3, 5),
+    "ridge_persistence": (0.35, 0.55),
+    "basin_radius": (0.35, 0.8),
+    "corridor_drop": (5.0, 60.0),
+    "carve_strength": (0.5, 0.95),
+    "carve_width": (0.1, 0.8),
+    "blur_passes": (0, 3),
+    "slope_limit": (0.0, 6.0),
+    "mid_amp": (0.0, 80.0),
+    "base_amp": (15.0, 50.0),
+    "valley_level": (50.0, 90.0),
+    "sea_level": (55.0, 95.0),
+    "snow_line": (140.0, 265.0),
+    "snow_quantile": (0.05, 0.95),
+}
 
 
-def measure(h: np.ndarray) -> dict:
-    gy, gx = np.gradient(h)
-    sl = np.hypot(gx, gy).ravel()
-    return {
-        "p50": float(np.percentile(sl, 50)),
-        "p90": float(np.percentile(sl, 90)),
-        "p99": float(np.percentile(sl, 99)),
-        "max": float(sl.max()),
-        "gt2": float((sl > 2).mean() * 100),
-        "gt4": float((sl > 4).mean() * 100),
-        "span": float(h.max() - h.min()),
-    }
+def proc_masks(h: np.ndarray, p: Params):
+    """Height field -> the same triple the world reader gives us."""
+    water = np.where(h < p.sea_level, p.sea_level, -1e4).astype(np.float32)
+    flags = np.zeros(h.shape, dtype=np.uint8)
+    thr = float(np.quantile(h, p.snow_quantile)) if p.snow_quantile > 0 else p.snow_line
+    flags[h > thr] = 1                              # bit0 = snow
+    return water, flags
 
 
-def score(m: dict) -> float:
-    """Lower is better: log-ratio error, so p99=11 vs 2.5 counts as much as 0.1 vs 0.3."""
-    w = {"p50": 1.0, "p90": 1.0, "p99": 1.5, "max": 0.5, "gt2": 1.0, "gt4": 1.0, "span": 0.3}
-    e = 0.0
-    for k, ww in w.items():
-        a = max(m[k], 1e-3)
-        b = max(TARGET[k], 1e-3)
-        e += ww * abs(np.log(a / b))
-    return e
+def evaluate(p: Params, target: dict) -> tuple[float, dict, dict]:
+    h, _centers = build(p)
+    water, flags = proc_masks(h, p)
+    m = compute(h, water, flags)
+    res = compare(target, m)
+    return res["distance"], m, res
 
 
-def run(**over) -> tuple[dict, float]:
-    p = Params(**{k: v for k, v in over.items() if k in Params.__dataclass_fields__})
-    for k, v in over.items():
-        setattr(p, k, v)
-    h, _ = build(p)
-    m = measure(h)
-    return m, score(m)
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--target", required=True, help="metrics JSON of the reference map")
+    ap.add_argument("--random", type=int, default=0, help="sample N parameter sets")
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--best", help="write the best parameter set as JSON")
+    ap.add_argument("--json", dest="json_out", help="write the search log as JSON")
+    ap.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE")
+    args = ap.parse_args()
+
+    target = json.loads(Path(args.target).read_text(encoding="utf-8"))
+    base = Params()
+
+    over: dict = {}
+    for kv in args.set:
+        k, _, v = kv.partition("=")
+        if not hasattr(base, k):
+            raise SystemExit(f"unknown param: {k}")
+        cur = getattr(base, k)
+        over[k] = int(float(v)) if isinstance(cur, int) else float(v)
+
+    if args.random == 0:
+        p = Params(**{**asdict(base), **over})
+        dist, m, res = evaluate(p, target)
+        print(f"distance = {dist:.4f}   (0 = identical to {Path(args.target).name})")
+        for k, v in res["residuals"].items():
+            print(f"  {k:20} target {v['a']:>9.3f}   proc {v['b']:>9.3f}   log-ratio {v['log_ratio']:+.3f}")
+        if args.json_out:
+            Path(args.json_out).write_text(json.dumps({"distance": dist, "metrics": m,
+                                                       "residuals": res["residuals"]},
+                                                      indent=2), encoding="utf-8")
+        return 0
+
+    rng = random.Random(args.seed)
+    log, best = [], (1e9, None, None)
+    for i in range(args.random):
+        trial = {}
+        for key, (lo, hi) in RANGES.items():
+            trial[key] = rng.randint(int(lo), int(hi)) if isinstance(lo, int) and isinstance(hi, int) \
+                else rng.uniform(lo, hi)
+        trial.update({k: v for k, v in over.items()})       # explicit --set wins
+        p = Params(**{**asdict(base), **trial})
+        dist, m, res = evaluate(p, target)
+        log.append({"distance": dist, "params": trial})
+        if dist < best[0]:
+            best = (dist, trial, m)
+        print(f"  [{i:3d}] distance {dist:6.3f}  "
+              f"slope {m['slope']['p50']:.2f}/{m['slope']['p90']:.2f}/{m['slope']['p99']:.2f}  "
+              f"water {m['cover']['water_pct']:.1f}%  snow {m['cover']['snow_pct']:.1f}%  "
+              f"ridge {m['ridge_per_km2']:.0f}")
+
+    dist, params, m = best
+    print(f"\nbest distance = {dist:.4f}")
+    for k, v in params.items():
+        print(f"  {k:20} {v}")
+    if args.best:
+        Path(args.best).write_text(json.dumps({"distance": dist, "params": params, "metrics": m},
+                                              indent=2), encoding="utf-8")
+        print(f"-> {args.best}")
+    if args.json_out:
+        log.sort(key=lambda r: r["distance"])
+        Path(args.json_out).write_text(json.dumps(log, indent=2), encoding="utf-8")
+        print(f"-> {args.json_out}")
+    return 0
 
 
 if __name__ == "__main__":
-    over = {}
-    for kv in sys.argv[1:]:
-        k, _, v = kv.partition("=")
-        over[k] = float(v) if "." in v else int(v)
-    if not over:
-        over = dict(size=1024, basin_radius=0.45, ridge_amp=190, valley_level=62, sea_level=74)
-    m, sc = run(**over)
-    print(f"score={sc:.3f}")
-    for k in TARGET:
-        flag = "  " if abs(np.log(max(m[k], 1e-3) / max(TARGET[k], 1e-3))) < 0.25 else "!!"
-        print(f"  {flag} {k:5} got {m[k]:8.2f}   target {TARGET[k]:8.2f}")
+    raise SystemExit(main())

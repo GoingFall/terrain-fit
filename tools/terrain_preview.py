@@ -109,6 +109,8 @@ class Params:
     warp_amp: float = 0.035      # domain warp strength (blocks / size)
     warp_freq: float = 4.0
     sea_level: float = 74.0
+    snow_line: float = 210.0      # height above which the surface counts as snow (metrics only)
+    snow_quantile: float = 0.0    # >0: ignore snow_line, use this height quantile instead
     corridor_deg: float = 40.0   # width of the low "view corridor"
     corridor_drop: float = 45.0
     # camera

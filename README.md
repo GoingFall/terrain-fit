@@ -34,7 +34,7 @@ measurements. This repo is the measuring + viewing half of that loop.
 | Real per-block colours from vanilla 1.20.1 textures (JEI-style: sample sprite + biome tint) | `tools/block_palette.py` |
 | **Terrain metrics panel** (relief, slope percentiles, water/snow cover, ridge density) + JSON export | `tools/terrain_metrics.py` |
 | **Metric distance + batch table** (compare maps numerically, no images) | `tools/terrain_metrics.py --compare`, `tools/batch_metrics.py` |
-| Parameter search against a target's metrics | `tools/fit_metrics.py` |
+| Single-target parameter search (minimises the same metric distance) | `tools/fit_metrics.py --target metrics.json --random N` |
 | Procedural terrain preview (parameters → picture, no game needed) | `tools/terrain_preview.py` |
 
 ## Quick start
@@ -149,9 +149,11 @@ standard library; large maps scale with CPU cores (`--workers N`).
 
 ## Roadmap
 
-1. **Multi-scale terrain fitting**: gradient spectra at several blur radii (the single-scale
-   percentile fit is known to fail, see below) plus ridge density, then a search that keeps both
-   "how steep" and "how busy" inside the target range.
+1. **A generator model that can represent the target, then fit it.** A random search over the
+   current single-ring generator reached distance 0.40 against a snow-alpine reference, but the
+   render is still wrong (relief 130 vs 238, cliff share 0 vs 0.14): the model produces plateaus
+   with spikes, so more search will not help. Next: add a macroscale relief term and a sparse
+   cliff term, then re-fit.
 2. **Datapack export**: turn the fitted parameters into a `noise_settings` JSON that runs in-game
    (1.20.1), then verify the real terrain against the preview with `world_heightmap.py`.
 3. **Temporal denoising (TAA)** in the viewer to remove the residual grazing-angle noise.
