@@ -109,6 +109,64 @@ def spectrum(ground: np.ndarray, valid: np.ndarray, max_side: int = 1024) -> dic
     return {"bands_pct": bands, "spectral_slope": slope}
 
 
+def hypsometry(ground: np.ndarray, valid: np.ndarray, bins: int = 16) -> dict:
+    """Elevation-area curve: a basin keeps most of its area low, a plateau keeps it mid-high.
+
+    This is the cheapest descriptor that separates "bowl" from "hills" from "mesa" — the shape
+    information that slope percentiles and spectra both throw away.
+    """
+    h = ground[valid]
+    if h.size == 0:
+        return {}
+    lo, hi = float(h.min()), float(h.max())
+    t = (h - lo) / max(hi - lo, 1e-6)
+    counts, _ = np.histogram(t, bins=bins, range=(0.0, 1.0))
+    return {
+        "integral": float(t.mean()),                  # 0.5 = symmetric, <0.5 = basin, >0.5 = mesa
+        "p25": float(np.percentile(t, 25)),
+        "p50": float(np.percentile(t, 50)),
+        "p75": float(np.percentile(t, 75)),
+        "bins_pct": [float(c / h.size * 100) for c in counts],
+    }
+
+
+def anisotropy(ground: np.ndarray, valid: np.ndarray, max_side: int = 1024) -> dict:
+    """Directional energy in the mid-frequency band: ring ridges are isotropic, a wall is not."""
+    ys, xs = np.where(valid)
+    if xs.size < 64:
+        return {}
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    crop = ground[y0:y1, x0:x1].astype(np.float64)
+    mask = valid[y0:y1, x0:x1]
+    crop = np.where(mask, crop, float(np.median(crop[mask])))
+    crop -= crop.mean()
+    step = max(1, int(np.ceil(max(crop.shape) / max_side)))
+    crop = crop[::step, ::step]
+    h, w = crop.shape
+    spec = np.abs(np.fft.rfft2(crop * np.outer(np.hanning(h), np.hanning(w)))) ** 2
+    fy = np.fft.fftfreq(h)[:, None]
+    fx = np.fft.rfftfreq(w)[None, :]
+    freq = np.hypot(fy, fx)
+    with np.errstate(divide="ignore"):
+        wl = 1.0 / freq
+    band = (wl >= 64) & (wl <= 512)
+    if not band.any():
+        return {}
+    ang = np.degrees(np.arctan2(fy, fx)) % 180.0
+    sectors = np.floor(ang / 22.5).astype(int) % 8
+    energy = np.zeros(8)
+    for i in range(8):
+        m = band & (sectors == i)
+        energy[i] = spec[m].sum()
+    tot = energy.sum() or 1.0
+    share = energy / tot
+    return {
+        "ratio": float(share.max() / max(share.min(), 1e-6)),
+        "angle_deg": float((int(np.argmax(share)) + 0.5) * 22.5),
+        "sectors_pct": [float(v * 100) for v in share],
+    }
+
+
 def compute(ground: np.ndarray, water: np.ndarray, flags: np.ndarray,
             valid: np.ndarray | None = None) -> dict:
     if valid is None:
@@ -149,6 +207,8 @@ def compute(ground: np.ndarray, water: np.ndarray, flags: np.ndarray,
         "snow_line": float(np.median(ground[snow])) if snow.any() else None,
         "ridge_per_km2": ridge_density(ground, valid),
         "spectrum": spectrum(ground, valid),
+        "hypsometry": hypsometry(ground, valid),
+        "anisotropy": anisotropy(ground, valid),
     }
 
 
@@ -180,6 +240,12 @@ WEIGHTS = {
     "spectrum.bands_pct.128-256": 0.8,
     "spectrum.bands_pct.64-128": 1.0,
     "spectrum.bands_pct.32-64": 1.0,
+    # structural descriptors: where the area sits vertically, and whether ridges form rings
+    "hypsometry.integral": 1.2,
+    "hypsometry.p25": 0.6,
+    "hypsometry.p50": 0.6,
+    "hypsometry.p75": 0.6,
+    "anisotropy.ratio": 0.8,
 }
 EPS = 0.05
 EPS_PCT = 0.5          # for percentage metrics that can be near zero
@@ -202,7 +268,7 @@ def compare(a: dict, b: dict) -> dict:
             continue                     # metric missing on one side (older JSON) -> skip
         if va is None or vb is None:
             continue
-        eps = EPS_PCT if "bands_pct" in key else EPS
+        eps = EPS_PCT if ("bands_pct" in key or "sectors_pct" in key) else EPS
         la = np.log(max(va, eps))
         lb = np.log(max(vb, eps))
         d = abs(la - lb)
@@ -247,6 +313,13 @@ def main() -> int:
         print(f"  {group}: " + ", ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}"
                                          for k, v in m[group].items()))
     print(f"  snow_line={m['snow_line']}  ridge_per_km2={m['ridge_per_km2']:.1f}")
+    if m.get("hypsometry"):
+        hp = m["hypsometry"]
+        print(f"  hypsometry: integral {hp['integral']:.3f}  p25/50/75 "
+              f"{hp['p25']:.2f}/{hp['p50']:.2f}/{hp['p75']:.2f}")
+    if m.get("anisotropy"):
+        an = m["anisotropy"]
+        print(f"  anisotropy: ratio {an['ratio']:.2f}  dominant {an['angle_deg']:.0f} deg")
     if m.get("spectrum"):
         sp = m["spectrum"]
         print(f"  spectrum: slope {sp['spectral_slope']:+.3f}")
