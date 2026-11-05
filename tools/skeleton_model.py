@@ -27,6 +27,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from world_layers import collect_layers  # noqa: E402
+from fit_heightfield import noise2  # noqa: E402  (same value noise as the mod)
+
 
 
 def peaks(h: np.ndarray, mask: np.ndarray, count: int, min_sep: float) -> list[tuple[float, float, float]]:
@@ -61,21 +63,40 @@ def field(P: dict, X: np.ndarray, Z: np.ndarray) -> np.ndarray:
             t = np.clip(((X - x1) * dx + (Z - z1) * dz) / max(dx * dx + dz * dz, 1e-6), 0.0, 1.0)
             d = np.minimum(d, np.hypot(X - (x1 + t * dx), Z - (z1 + t * dz)))
         h -= v["depth"] * np.exp(-(d / max(v["width"], 1.0)) ** 2)
+    if P.get("detailAmp", 0.0) != 0.0:
+        h = h + P["detailAmp"] * noise2(X, Z, P.get("detailFreq", 20.0) / 512.0, 2024, 3)
     return h
+
+
+def pits(h: np.ndarray, mask: np.ndarray, count: int, min_sep: float):
+    """Same greedy picking but for the lowest points (basins / valley floors)."""
+    work = np.where(mask, h, 1e9).copy()
+    picked = []
+    for _ in range(count):
+        idx = int(np.argmin(work))
+        y, x = divmod(idx, work.shape[1])
+        if work[y, x] > 1e8:
+            break
+        picked.append((float(x), float(y), float(work[y, x])))
+        yy, xx = np.ogrid[: work.shape[0], : work.shape[1]]
+        work[(xx - x) ** 2 + (yy - y) ** 2 <= min_sep ** 2] = 1e9
+    return picked
 
 
 def initial_model(h: np.ndarray, mask: np.ndarray, count: int) -> dict:
     lo = float(np.percentile(h[mask], 2))
-    pk = peaks(h, mask, count, min_sep=h.shape[0] / (count ** 0.5) * 1.3)
+    hi = float(np.percentile(h[mask], 98))
+    sep = h.shape[0] / (count ** 0.5) * 1.3
     massifs = []
-    for x, z, y in pk:
-        massifs.append({
-            "cx": x, "cz": z,
-            "radius": h.shape[0] / (count ** 0.5) * 1.1,
-            "elong": 1.6, "angle": 35.0,
-            "amp": max(y - lo, 5.0),
-        })
-    return {"base": lo, "massifs": massifs, "valleys": []}
+    for x, z, y in peaks(h, mask, count, sep):
+        massifs.append({"cx": x, "cz": z, "radius": h.shape[0] / (count ** 0.5) * 1.1,
+                        "elong": 1.6, "angle": 35.0, "amp": max(y - lo, 5.0)})
+    # negative massifs: the reference's low basins, which the positive peaks cannot express
+    for x, z, y in pits(h, mask, max(2, count // 3), sep):
+        massifs.append({"cx": x, "cz": z, "radius": h.shape[0] / (count ** 0.5) * 1.0,
+                        "elong": 1.4, "angle": 35.0, "amp": min(y - hi, -5.0)})
+    return {"base": 0.5 * (lo + hi), "massifs": massifs, "valleys": [],
+            "detailAmp": 0.0, "detailFreq": 20.0}
 
 
 def main() -> int:
@@ -123,7 +144,7 @@ def main() -> int:
                     elif key == "angle":
                         cand = cand % 180.0
                     elif key == "amp":
-                        cand = max(0.0, min(300.0, cand))
+                        cand = max(-300.0, min(300.0, cand))
                     else:
                         cand = max(-64.0, min(n + 64.0, cand))
                     if cand == cur:
@@ -134,6 +155,15 @@ def main() -> int:
                         best, improved = l, improved + 1
                         break
                     m[key] = cur
+        for key, span in (("detailAmp", 2.0), ("detailFreq", 6.0)):
+            for sign in (1.0, -1.0):
+                old = P[key]
+                P[key] = max(0.0 if key == "detailAmp" else 2.0, old + sign * span)
+                l = loss(P)
+                if l < best - 1e-3:
+                    best, improved = l, improved + 1
+                    break
+                P[key] = old
         for key in steps:
             steps[key] *= 0.7
         print(f"  round {r}: rmse {best:.2f}  (improved {improved})")

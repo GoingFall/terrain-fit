@@ -1,0 +1,12 @@
+Skeleton with basins and a detail layer, refitted and ported
+
+- skeleton_model.py now seeds negative massifs at the reference's low points (the positive peaks
+  cannot express a basin) and fits a detail noise layer (amplitude and frequency) on top
+- refit: rmse 9.9 blocks, correlation 0.979, and the height distribution now matches the reference
+  closely (percentiles p5/p25/p50/p75/p95: 73/129/172/199/229 against 68/129/171/200/228)
+- ported to the mod (massif amplitudes may be negative, plus detailAmp/detailFreq)
+
+In-game with the new config: snow 68.1% (target 63.9) -- the logistic snow rule works; relief 283
+(target 238) overshoots because the fitted field spans 22..280 rather than the reference's 39..277;
+ridge density 66 vs 278, i.e. the detail layer (amp 2, freq 20) is far too weak; water 3.9% because
+sea level 59 sits above the new minimum of 11.
