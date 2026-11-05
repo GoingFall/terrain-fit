@@ -1,12 +1,16 @@
-Skeleton with basins and a detail layer, refitted and ported
+Tuning round: relief, detail and sea level against the reference
 
-- skeleton_model.py now seeds negative massifs at the reference's low points (the positive peaks
-  cannot express a basin) and fits a detail noise layer (amplitude and frequency) on top
-- refit: rmse 9.9 blocks, correlation 0.979, and the height distribution now matches the reference
-  closely (percentiles p5/p25/p50/p75/p95: 73/129/172/199/229 against 68/129/171/200/228)
-- ported to the mod (massif amplitudes may be negative, plus detailAmp/detailFreq)
+- scale/offset: the fitted skeleton spanned 22..280, the reference 39..277; an affine on the field
+  brings relief to 249 (target 238) and the range to 28..277
+- detail layer: 8 @ 45 Hz produced 4958 crests/km2 (target 278), 3 @ 30 gave 469, and 2.2 @ 24 gives
+  178 -- so the detail amplitude is the knob for ridge density and it is quite sensitive
+- sea level 40: water 0.8% against 0.59%
 
-In-game with the new config: snow 68.1% (target 63.9) -- the logistic snow rule works; relief 283
-(target 238) overshoots because the fitted field spans 22..280 rather than the reference's 39..277;
-ridge density 66 vs 278, i.e. the detail layer (amp 2, freq 20) is far too weak; water 3.9% because
-sea level 59 sits above the new minimum of 11.
+Current against the reference region:
+
+    relief 249 vs 238      p50 0.50 vs 0.71      snow 69.2% vs 63.9%
+    water 0.8% vs 0.59%    ridges 178 vs 278     distance 0.489
+
+That is the best score so far (the pure noise model never got below 0.51, and the datapack route
+stalled at 0.87). Remaining gaps: slope gt4 (0.68% vs 0.14%, too many small cliffs), the 64-128 Hz
+band (0.04% vs 1.65%, no mid-scale structure), anisotropy (36 vs 86).
