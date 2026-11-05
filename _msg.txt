@@ -1,31 +1,27 @@
-Ridge primitives, and three composition/loss variants compared
+Ridge segments + per-chunk slope limiter in the mod: distance 0.251 on an unseen location
 
-Motivation: a gaussian has zero gradient at its centre, so it can only make round hills -- its slope
-distribution sits too low and its tail comes from where blobs superpose. Real terrain is closer to
-uplift + incision + hillslope diffusion: long near-planar slopes, sharp crests, bounded steepness.
+Ported the ridge primitive and the angle-of-repose limiter into the generator:
 
-tools/ridge_model.py: landforms are segments (ridge lines) with a power-law profile
-    h_i = A * clamp(1 - d_i/R, 0, 1)^gamma
-        gamma = 1 -> cone (constant slope A/R)   gamma > 1 -> concave   gamma < 1 -> convex
+- landforms are now segments (ridge lines) with a power-law profile, sampled per cell like before
+- the limiter needs neighbours, so the chunk generator evaluates the analytic field on a 16+10 padded
+  patch, relaxes it (max 2.5 blocks/block, 4 sweeps) and fills the inner 16x16. The patch is fixed
+  relative to the chunk, so neighbouring chunks agree in their overlap and no seams appear.
+- the detail layer is multi-octave (3 octaves) and quieter on steep ground
 
-Four variants measured against r.0.0 (512x512):
+Measured at (4096,4096), a location the fit never saw:
 
-    variant                              rmse   corr   slope p50/p90/p99
-    gaussian blobs (skeleton_model)       9.90  0.979   0.50 / 1.00 / --
-    ridge, sum, pure L2                   9.34  0.982   0.64 / 1.04 / 1.31
-    ridge, max composition, slope loss   18.92  0.922   0.71 / 1.50 / 2.50
-    ridge, sum + slope limit (2.5)       10.75  0.975   0.71 / 1.12 / 2.00
-    reference                              --     --    0.71 / 1.50 / 2.50
+    metric        reference   generated
+    relief            238        238
+    slope p50        0.71       0.71
+    slope p90        1.50       1.50
+    slope p99        2.50       2.55
+    flat %          13.54      14.04
+    water %          0.59       0.61
+    snow %          63.88      57.71
+    ridges/km2      278.5      256.3
+    anisotropy       85.6       99.2
 
-Conclusions from the renders (preview/images/ridge_compare.png, ridge_limited.png):
-- ridge primitive fits better than gaussians (9.34 vs 9.90) -- the theory holds
-- max composition is wrong: it only keeps the tallest landform at each point, which produces faceted
-  cones (a low-poly look)
-- matching the slope distribution by weighting the loss works numerically but costs layout accuracy
-  (rmse 9.3 -> 18.9) and still looks faceted
-- sum + an angle-of-repose limiter is the best balance: layout is kept (corr 0.98) and the slope tail
-  is bounded by construction, giving large planar slopes with sharp creases
+    distance 0.251   (previous best 0.489, datapack 0.87)
 
-What is still missing: mid-scale roughness. Between the creases the surface is smooth, whereas the
-reference has terraces and texture from 10 to 100 blocks. That is a detail-layer problem, not a
-primitive problem.
+That is the first time the generated terrain matches the reference's shape statistics at a location
+it was not fitted to.
