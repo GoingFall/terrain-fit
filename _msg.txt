@@ -1,26 +1,18 @@
-Procedural mode: the generator now produces new landscapes, not a copy of one window
+Archive the scouting phase and the abandoned datapack route; rewrite the docs to match reality
 
-The requirement is a mod whose terrain generation produces reference-like scenery in some regions,
-so a fixed list of massif coordinates was the wrong model. FitParams gains a procedural mode:
+Workspace had drifted: the README described the datapack export as the deliverable, while the actual
+work had moved to a Forge generator, and the tree mixed 28 MB of superseded outputs with the live
+pipeline.
 
-  * one candidate landform per cell (128 blocks), sampled from the distributions measured on the
-    fitted skeleton: peaks 75%, basins 30%, radius 73..143, elongation 0.72..1.90, amplitude 73..165,
-    orientation uniform
-  * contributions summed over the 3x3 cell neighbourhood, so landforms blend
-  * a slow region mask (period ~2000 blocks) decides where the style applies at all, i.e. "certain
-    regions" rather than everywhere
-  * heights clamped to the world before filling
+Layout now:
 
-Verified at a fresh location (4096,4096), which has nothing to do with the reference's coordinates:
+  tools/       the pipeline (unchanged)
+  mod/         Forge source (FitTerrain = the model, FitParams = its JSON config)
+  dist/        fit-1.0.0.jar only
+  reports/     current-state.md  -- numbers, model, what did not work
+  preview/     viewers/ images/ fits/  -- small, current only
+  archive/     README.md + scene-identification/ reports-scouting/ datapacks/ viewers/ images/
+               experiments/
 
-    metric        reference   procedural
-    relief            238        245
-    snow %           63.9       57.5
-    ridges/km2      278.5      141.6
-    anisotropy       85.6      139.6
-    slope p50/p90   0.71/1.5   0.50/1.0
-    slope p99        2.50      10.51   (too many small cliffs)
-    water %          0.59       3.30
-
-That is the first honest generalisation measurement in this project: a landscape the fit never saw,
-produced from distributions rather than positions.
+Everything moved keeps its provenance; archive/README.md says what each folder is and why it is no
+longer needed. Runtime-only trees (_server, _forgeserver, _mod, _map, _palette, _tpl) are gitignored.

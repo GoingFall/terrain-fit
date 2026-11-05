@@ -1,33 +1,26 @@
-# --- local, regenerable, or third-party content -------------------------------
-# downloaded map archive (not ours to redistribute)
+# runtime-only and regenerable content ----------------------------------------
+
+# servers and toolchains (hundreds of MB, rebuild with the documented commands)
+_server/
+_forgeserver/
+_mod/
+
+# the reference map (downloaded, not ours to redistribute)
 _map/
 
-# cached vanilla textures (fetched on demand by tools/block_palette.py)
+# caches: vanilla textures and data-pack templates (fetched on demand)
 _palette/
+_tpl/
+_tpl.json
 
-# generated viewers (multi-MB single-file HTML, rebuild with tools/world_viewer.py)
-preview/*.html
-
-# scratch / self-test output
+# scratch
 _tmp/
 _selftest/
 __pycache__/
 *.pyc
 
-# screenshots and evidence crops kept outside the repo for size
+# evidence crops and source frames (archived under archive/scene-identification/)
 crops/
 annotated/
 gallery/
 input/
-
-# fetched vanilla template (cached by tools/export_datapack.py)
-_tpl.json
-_tpl/
-
-# build toolchains and servers (regenerable, hundreds of MB)
-_mod/mdk/build/
-_mod/mdk/.gradle/
-_mod/
-_forgeserver/
-_tpl/
-_server/run/
