@@ -1,21 +1,18 @@
-Skeleton model ported to the mod, and measured in game
+Fit the snow separately from the terrain (and it turns out to be pure altitude)
 
-FitParams now carries a massif list (oriented gaussians) and optional valley polylines; FitTerrain
-switches to the skeleton whenever that list is non-empty, so a config edit changes the whole terrain
-generator with no rebuild.
+tools/fit_snow.py fits  logit P(snow) = (height - line) / width + climate(x,z)  against the observed
+snow mask, and reports accuracy against trivial baselines.
 
-In-game measurement of the skeleton (11 massifs fitted to region r.0.0):
+Result on r.0.0: a height-only logistic already reaches logloss 0.391 and 81.5% accuracy
+(always-no-snow is 63.9%). Adding nine climate blobs improved it *zero* times, so the snow pattern
+carries no extra spatial structure -- it is altitude, with a 25-block transition at y=140, and the
+remaining error is the inherent scatter of a binary field.
 
-    relief 209 (target 238)     slope p50 0.71 (exact)    p99 2.50 (exact)
-    ridge density 22 vs 278     water 3.7% vs 0.59%       snow 28.2% vs 63.9%
-    distance 0.513  -- the noise model managed 0.62-0.68
+So the treatment in the mod is now: score = (height - snowLine)/snowWidth + snowNoise*mask, snow
+where score > 0. With line 140 / width 25 the generated world covers 63.1% against the reference's
+63.9%.
 
-Two findings from this run:
-- switching the test biome from snowy_plains to plains cut snow from 85% to 28% without touching our
-  own rule, which confirms the biome's own snow layers were stacking on top of ours
-- ridge density collapsed from 291 to 22 at the same time: the earlier 291 was merely the 1-block
-  snow-layer bumps being counted as crests. The skeleton is genuinely too smooth, which is also why
-  the 64-128 Hz band is empty.
-
-Next: add a detail noise layer on top of the skeleton (and re-fit it), then raise the snow line's
-coverage to the reference's 64%.
+What does not match yet is the shape of the curve: the generated terrain has almost no columns
+between y=80 and 120 (the reference has 21.8% of its area there with snow), so our transition looks
+sharper. That is a terrain-distribution problem, not a snow-rule problem -- the skeleton fit lacks the
+reference's low basin.
