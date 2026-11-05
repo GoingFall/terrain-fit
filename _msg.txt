@@ -1,16 +1,26 @@
-Tuning round: relief, detail and sea level against the reference
+Procedural mode: the generator now produces new landscapes, not a copy of one window
 
-- scale/offset: the fitted skeleton spanned 22..280, the reference 39..277; an affine on the field
-  brings relief to 249 (target 238) and the range to 28..277
-- detail layer: 8 @ 45 Hz produced 4958 crests/km2 (target 278), 3 @ 30 gave 469, and 2.2 @ 24 gives
-  178 -- so the detail amplitude is the knob for ridge density and it is quite sensitive
-- sea level 40: water 0.8% against 0.59%
+The requirement is a mod whose terrain generation produces reference-like scenery in some regions,
+so a fixed list of massif coordinates was the wrong model. FitParams gains a procedural mode:
 
-Current against the reference region:
+  * one candidate landform per cell (128 blocks), sampled from the distributions measured on the
+    fitted skeleton: peaks 75%, basins 30%, radius 73..143, elongation 0.72..1.90, amplitude 73..165,
+    orientation uniform
+  * contributions summed over the 3x3 cell neighbourhood, so landforms blend
+  * a slow region mask (period ~2000 blocks) decides where the style applies at all, i.e. "certain
+    regions" rather than everywhere
+  * heights clamped to the world before filling
 
-    relief 249 vs 238      p50 0.50 vs 0.71      snow 69.2% vs 63.9%
-    water 0.8% vs 0.59%    ridges 178 vs 278     distance 0.489
+Verified at a fresh location (4096,4096), which has nothing to do with the reference's coordinates:
 
-That is the best score so far (the pure noise model never got below 0.51, and the datapack route
-stalled at 0.87). Remaining gaps: slope gt4 (0.68% vs 0.14%, too many small cliffs), the 64-128 Hz
-band (0.04% vs 1.65%, no mid-scale structure), anisotropy (36 vs 86).
+    metric        reference   procedural
+    relief            238        245
+    snow %           63.9       57.5
+    ridges/km2      278.5      141.6
+    anisotropy       85.6      139.6
+    slope p50/p90   0.71/1.5   0.50/1.0
+    slope p99        2.50      10.51   (too many small cliffs)
+    water %          0.59       3.30
+
+That is the first honest generalisation measurement in this project: a landscape the fit never saw,
+produced from distributions rather than positions.
