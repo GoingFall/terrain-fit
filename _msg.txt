@@ -1,17 +1,27 @@
-Disable structures; the straight lines were cone creases, not chunk seams
+Adopt geomorphons (the descriptor behind PTRM) as the structural metric
 
-1. Villages were generating inside the custom dimension (dirt_path 1533 columns, 197x223 blocks) and
-   showed up in the preview as crosses and sand patches. structure_overrides is part of the vanilla
-   noise generator's codec and does nothing for our own ChunkGenerator, so the fix is to override
-   createStructures/createReferences to no-ops. dirt_path is now zero and unknown blocks dropped from
-   11k to 177 (the 11k came from a mushroom_fields experiment that spawned huge mushrooms).
+Five marginal statistics failed to separate our terrain from the reference (tile variance, curvature,
+level-set curvature, facet coherence, slope percentiles -- all matched while the pictures clearly
+differ). Searching the literature turned up PTRM (Rajasekaran et al., ACM TAP 2022), a *perceptual*
+terrain realism metric built on geomorphons: every cell is classified into one of ten landforms
+(flat, peak, ridge, shoulder, spur, slope, hollow, valley, footslope, pit) from an eight-direction
+ternary pattern, and the distribution of those classes is what correlates with human realism
+judgements. Their finding is that synthetic terrain looks synthetic precisely because it lacks
+valleys, ridges, hollows and spurs.
 
-2. The straight lines in the top-down are not chunk seams. Measuring |dx| per column: the biggest
-   jumps are at x=383 (6.5 blocks), x=181 and x=63 -- only two of those are chunk borders, and the
-   chunk-border bias is +0.15 blocks. They are the creases where two truncated cones meet: the
-   landforms are cones, and their intersection traces a straight line.
+tools/geomorphons.py implements the classifier and prints the distribution.
 
-So the remaining visual problem is the primitive's shape, not a bug: large planar facets with
-straight edges, whereas the reference has curved ridge lines and slopes that change character along
-the ridge. Next step would be curved ridge polylines (bend each segment) plus more mid-scale noise to
-break up the planar facets.
+At radius 30 blocks, flat tolerance 2:
+
+    landform     reference   generated
+    ridge           2.40%       1.29%
+    hollow          4.53%       3.42%
+    valley          0.26%       1.82%
+    footslope       1.16%       0.64%
+    spur            4.61%       4.42%
+    slope          85.55%      86.85%
+
+This is the first descriptor that separates the two, and it is interpretable: our terrain is a field of
+convex domes whose gaps read as *valleys* (7x too many), while the reference is *ridges* with concave
+*hollows* along their flanks. That is a concrete model change: landforms should be ridge lines with
+curvature variation along the slope, not domes.
