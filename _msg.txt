@@ -1,27 +1,20 @@
-Ridge segments + per-chunk slope limiter in the mod: distance 0.251 on an unseen location
+Surface pass: rock on steep ground, snow as a layer, and a mid-scale roughness term
 
-Ported the ridge primitive and the angle-of-repose limiter into the generator:
+Three changes to what the player actually sees:
 
-- landforms are now segments (ridge lines) with a power-law profile, sampled per cell like before
-- the limiter needs neighbours, so the chunk generator evaluates the analytic field on a 16+10 padded
-  patch, relaxes it (max 2.5 blocks/block, 4 sweeps) and fills the inner 16x16. The patch is fixed
-  relative to the chunk, so neighbouring chunks agree in their overlap and no seams appear.
-- the detail layer is multi-octave (3 octaves) and quieter on steep ground
+1. surface by local slope: gradient > rockSlope (1.6) keeps bare stone, otherwise grass; snow only
+   settles where the ground is gentler than the same threshold. That is what stops high ground from
+   reading as one white blanket.
+2. snow is drawn as a snow *layer* above the ground instead of replacing the surface block, so grass
+   shows through on gentle ground the way it does on the reference map.
+3. a mid-scale noise term (midAmp 10, wavelength ~150 blocks) fills the 64-128 Hz gap that the
+   spectrum comparison had flagged as empty; secondary ridges now exist between the main ones.
 
-Measured at (4096,4096), a location the fit never saw:
+Also fixed: the slope limiter was applied on a chunk-relative patch, and because the relaxation is
+order dependent, neighbouring chunks disagreed across their border -- the seams showed up as straight
+lines in the top-down view. Replaced with a closed-form 5-point smoother that depends only on
+absolute position, so any two chunks agree by construction (measured border bias down from visible
+steps to +0.15 blocks).
 
-    metric        reference   generated
-    relief            238        238
-    slope p50        0.71       0.71
-    slope p90        1.50       1.50
-    slope p99        2.50       2.55
-    flat %          13.54      14.04
-    water %          0.59       0.61
-    snow %          63.88      57.71
-    ridges/km2      278.5      256.3
-    anisotropy       85.6       99.2
-
-    distance 0.251   (previous best 0.489, datapack 0.87)
-
-That is the first time the generated terrain matches the reference's shape statistics at a location
-it was not fitted to.
+Measured on r.8.8 after the change: relief 222, slope p50/p90/p99 0.71/1.41/2.06, snow 54%, water
+2.2%, ridges 217/km2 (reference: 238, 0.71/1.50/2.50, 64%, 0.6%, 278).
