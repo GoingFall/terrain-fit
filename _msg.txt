@@ -1,27 +1,28 @@
-Adopt geomorphons (the descriptor behind PTRM) as the structural metric
+Geomorphon-guided tuning: what helps, what does not, and one conflict
 
-Five marginal statistics failed to separate our terrain from the reference (tile variance, curvature,
-level-set curvature, facet coherence, slope percentiles -- all matched while the pictures clearly
-differ). Searching the literature turned up PTRM (Rajasekaran et al., ACM TAP 2022), a *perceptual*
-terrain realism metric built on geomorphons: every cell is classified into one of ten landforms
-(flat, peak, ridge, shoulder, spur, slope, hollow, valley, footslope, pit) from an eight-direction
-ternary pattern, and the distribution of those classes is what correlates with human realism
-judgements. Their finding is that synthetic terrain looks synthetic precisely because it lacks
-valleys, ridges, hollows and spurs.
+Built tools/proc_model.py, a Python mirror of the mod's procedural generator, so a parameter change can
+be scored in seconds (the geomorphon distribution included) instead of a 90 s server run. It also
+implements the two candidate fixes: a smooth union (k) and concave hollows carved on the flanks.
 
-tools/geomorphons.py implements the classifier and prints the distribution.
+Measured against the reference's geomorphon distribution (radius 30, flat tolerance 2), summing the
+absolute differences of ridge/hollow/valley/footslope/spur:
 
-At radius 30 blocks, flat tolerance 2:
+    variant                              ridge   hollow  valley   spur    error
+    current (detail 5)                    0.93    4.75    0.25    4.39    2.32
+    detail 1                              1.65    4.67    0.28    4.19    1.91   <- best
+    smooth union k=0.10                   0.35    6.47    0.20    3.60    5.66
+    smooth union + hollows                0.43    6.50    0.18    3.26    5.96
+    longer ridge segments (400-600)       0.21    5.33    0.25    4.86    3.70
+    reference                             2.40    4.53    0.26    4.61       -
 
-    landform     reference   generated
-    ridge           2.40%       1.29%
-    hollow          4.53%       3.42%
-    valley          0.26%       1.82%
-    footslope       1.16%       0.64%
-    spur            4.61%       4.42%
-    slope          85.55%      86.85%
+Findings:
+* Smooth union -- the fix that should have removed the "valleys between domes" -- works (valley 0.25
+  -> 0.20) but destroys the ridge class (0.93 -> 0.35). Net worse. Rejected.
+* Longer ridge segments also destroy ridges, so crest length is not the lever.
+* The one lever that works is the *detail amplitude*: it was masking the crests, and dropping it from 5
+  to 1 raises the ridge class by 78% and halves the error.
 
-This is the first descriptor that separates the two, and it is interpretable: our terrain is a field of
-convex domes whose gaps read as *valleys* (7x too many), while the reference is *ridges* with concave
-*hollows* along their flanks. That is a concrete model change: landforms should be ridge lines with
-curvature variation along the slope, not domes.
+The conflict worth recording: the slope-percentile and ridge-density metrics want detail 5 (that is
+what made ridge density 278/km2 match), while the geomorphon metric wants detail 1. One parameter
+cannot satisfy both, which is why the fitting has been oscillating between "too smooth" and "too
+broken". The objective needs the geomorphon term added explicitly and the trade-off chosen on purpose.
