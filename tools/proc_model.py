@@ -33,6 +33,36 @@ def cell_rand(ix, iz, seed, salt):
     return (h & np.uint32(0x7FFFFFFF)).astype(np.float64) / 0x7FFFFFFF
 
 
+def style_weights(P: dict, X, Z):
+    """Weights of the terrain provinces at every point (sums to 1).
+
+    The reference map is not one landscape: across its four sampled regions ridge share ranges
+    1.18-4.01% and hollow share 4.53-11.78%. A single stationary parameter set can only produce their
+    average, which need not occur anywhere in the map. So the world is divided into provinces by a
+    slow field and each landform is given the parameters of the province its centre falls in.
+    """
+    styles = P.get("styles")
+    if not styles:
+        return None
+    a = noise2(X, Z, P.get("styleFreq", 0.9) / 2048.0, P["seed"] + 11, 2) * 0.5 + 0.5
+    b = noise2(X, Z, P.get("styleFreq", 0.9) / 2048.0, P["seed"] + 23, 2) * 0.5 + 0.5
+    band = P.get("styleBand", 0.12)
+
+    def smooth(t):
+        t = np.clip((t - 0.5) / band + 0.5, 0, 1)
+        return t * t * (3 - 2 * t)
+
+    wa = 1.0 - smooth(a)
+    wc = smooth(b) * (1.0 - wa)
+    wb = 1.0 - wa - wc
+    return np.stack([wa, wb, wc])          # exactly three provinces
+
+
+def blend_styles(P: dict, w, scalar: float, key: str) -> float:
+    styles = P["styles"]
+    return sum(wi * styles[i].get(key, scalar) for i, wi in enumerate(w))
+
+
 def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
     xs = np.arange(x0, x0 + size, dtype=np.float64)
     zs = np.arange(z0, z0 + size, dtype=np.float64)
@@ -58,11 +88,30 @@ def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
                             np.where(kind < P["peakProb"] + P["basinProb"], -1.0, 0.0))
             jx = (ix + cell_rand(ix, iz, P["seed"], 2)) * cell
             jz = (iz + cell_rand(ix, iz, P["seed"], 3)) * cell
-            r = P["radiusMin"] + (P["radiusMax"] - P["radiusMin"]) * cell_rand(ix, iz, P["seed"], 4)
             ang = cell_rand(ix, iz, P["seed"], 6) * math.pi
-            amp = P["ampMin"] + (P["ampMax"] - P["ampMin"]) * cell_rand(ix, iz, P["seed"], 7)
-            ln = P["ridgeLenMin"] + (P["ridgeLenMax"] - P["ridgeLenMin"]) * cell_rand(ix, iz, P["seed"], 8)
-            gamma = P["gammaMin"] + (P["gammaMax"] - P["gammaMin"]) * cell_rand(ix, iz, P["seed"], 9)
+            rnd_r = cell_rand(ix, iz, P["seed"], 4)
+            rnd_a = cell_rand(ix, iz, P["seed"], 7)
+            rnd_l = cell_rand(ix, iz, P["seed"], 8)
+            rnd_g = cell_rand(ix, iz, P["seed"], 9)
+
+            styles = P.get("styles")
+            if styles:
+                # the province is decided at the landform's own centre, so a landform keeps one
+                # character all the way to its edge instead of changing shape mid-slope
+                wc_ = style_weights(P, jx, jz)
+                r = sum(wc_[i] * (st["radiusMin"] + (st["radiusMax"] - st["radiusMin"]) * rnd_r)
+                        for i, st in enumerate(styles))
+                amp = sum(wc_[i] * (st["ampMin"] + (st["ampMax"] - st["ampMin"]) * rnd_a)
+                          for i, st in enumerate(styles))
+                ln = sum(wc_[i] * (st["ridgeLenMin"] + (st["ridgeLenMax"] - st["ridgeLenMin"]) * rnd_l)
+                         for i, st in enumerate(styles))
+                gamma = sum(wc_[i] * (st["gammaMin"] + (st["gammaMax"] - st["gammaMin"]) * rnd_g)
+                            for i, st in enumerate(styles))
+            else:
+                r = P["radiusMin"] + (P["radiusMax"] - P["radiusMin"]) * rnd_r
+                amp = P["ampMin"] + (P["ampMax"] - P["ampMin"]) * rnd_a
+                ln = P["ridgeLenMin"] + (P["ridgeLenMax"] - P["ridgeLenMin"]) * rnd_l
+                gamma = P["gammaMin"] + (P["gammaMax"] - P["gammaMin"]) * rnd_g
 
             hx, hz = np.cos(ang) * ln * 0.5, np.sin(ang) * ln * 0.5
             vx, vz = 2 * hx, 2 * hz
