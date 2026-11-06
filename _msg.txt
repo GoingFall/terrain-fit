@@ -1,20 +1,17 @@
-Surface pass: rock on steep ground, snow as a layer, and a mid-scale roughness term
+Disable structures; the straight lines were cone creases, not chunk seams
 
-Three changes to what the player actually sees:
+1. Villages were generating inside the custom dimension (dirt_path 1533 columns, 197x223 blocks) and
+   showed up in the preview as crosses and sand patches. structure_overrides is part of the vanilla
+   noise generator's codec and does nothing for our own ChunkGenerator, so the fix is to override
+   createStructures/createReferences to no-ops. dirt_path is now zero and unknown blocks dropped from
+   11k to 177 (the 11k came from a mushroom_fields experiment that spawned huge mushrooms).
 
-1. surface by local slope: gradient > rockSlope (1.6) keeps bare stone, otherwise grass; snow only
-   settles where the ground is gentler than the same threshold. That is what stops high ground from
-   reading as one white blanket.
-2. snow is drawn as a snow *layer* above the ground instead of replacing the surface block, so grass
-   shows through on gentle ground the way it does on the reference map.
-3. a mid-scale noise term (midAmp 10, wavelength ~150 blocks) fills the 64-128 Hz gap that the
-   spectrum comparison had flagged as empty; secondary ridges now exist between the main ones.
+2. The straight lines in the top-down are not chunk seams. Measuring |dx| per column: the biggest
+   jumps are at x=383 (6.5 blocks), x=181 and x=63 -- only two of those are chunk borders, and the
+   chunk-border bias is +0.15 blocks. They are the creases where two truncated cones meet: the
+   landforms are cones, and their intersection traces a straight line.
 
-Also fixed: the slope limiter was applied on a chunk-relative patch, and because the relaxation is
-order dependent, neighbouring chunks disagreed across their border -- the seams showed up as straight
-lines in the top-down view. Replaced with a closed-form 5-point smoother that depends only on
-absolute position, so any two chunks agree by construction (measured border bias down from visible
-steps to +0.15 blocks).
-
-Measured on r.8.8 after the change: relief 222, slope p50/p90/p99 0.71/1.41/2.06, snow 54%, water
-2.2%, ridges 217/km2 (reference: 238, 0.71/1.50/2.50, 64%, 0.6%, 278).
+So the remaining visual problem is the primitive's shape, not a bug: large planar facets with
+straight edges, whereas the reference has curved ridge lines and slopes that change character along
+the ridge. Next step would be curved ridge polylines (bend each segment) plus more mid-scale noise to
+break up the planar facets.
