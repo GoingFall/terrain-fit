@@ -137,7 +137,7 @@ def render(h, valid=None, lo=None, hi=None):
     t = np.clip((hh - lo) / max(hi - lo, 1e-6), 0, 1)
     gy, gx = np.gradient(hh)
     s = np.hypot(gx, gy)
-    shade = 0.45 + 0.55 * np.clip((-gx - gy) / (s + 1e-6) * 0.8 + 0.5, 0, 1)
+    shade = 0.45 + 0.55 * np.clip((-gx - gy) / (s + 0.9) * 0.8 + 0.5, 0, 1)
     tt = np.clip(t * 1.4, 0, 1)[..., None]
     grass = np.stack([t * 0.42 + 0.22, t * 0.42 + 0.40, t * 0.26 + 0.16], axis=-1)
     rock = np.stack([t * 0.50 + 0.38, t * 0.48 + 0.36, t * 0.46 + 0.34], axis=-1)

@@ -1,33 +1,29 @@
-First patch-synthesis prototype: numbers are close, seams are not
+Tiled residual: the tiling is clean, the layout is the bottleneck
 
-tools/patch_synth.py builds a patch database from 15 of the reference's 16 regions, holds out r.3.3,
-and synthesises a 512x512 terrain there. Quilting is on a fixed lattice with hash-chosen patches, so
-it is deterministic and needs no search at runtime.
+tools/tile_synth.py implements the infinite-friendly scheme: a layout function plus a pool of
+high-frequency residual tiles selected by hash and combined by normalised overlap-add (Hann windows at
+50% hop, so the weights sum to exactly 1.000 everywhere -- verified).
 
-Two findings on the way:
-1. Blending raw patches produces a false gradient of (h_i - h_j)/cell wherever four patches meet:
-   slope p50 came out 1.73 against the reference's 0.71. Splitting each patch into a large-scale level
-   and a high-frequency detail fixed it (0.93).
-2. Patch synthesis alone cannot invent relief. With the level field taken from the patches the
-   synthesised terrain had relief 101 blocks against the reference's 261; the map's relief lives in the
-   arrangement of its landforms, not in their local texture.
+Three defects were found and fixed while chasing visible straight lines:
+1. each tile's residual had a non-zero mean, which is a constant offset per tile and shows as a faint
+   rectangular step; the windowed mean is now removed per tile.
+2. contrast normalisation over a small window clipped at its limit and produced its own bright lines;
+   the clip is now conservative.
+3. neither of those was the real cause. The lines sit at columns 63/223/383, spaced 160 = the analytic
+   layout's cellSize, and the layout alone reproduces them with a max/median gradient ratio of 9.84.
+   They are the cone creases of the analytic generator, the same defect identified several rounds ago
+   and never fixed.
 
-So the prototype is a hybrid: the analytic generator supplies the large-scale layout, the patches
-supply the local texture. Held-out comparison against the real r.3.3:
+With a crease-free fBm layout the spikes collapse to a ratio of 1.41, i.e. within noise. So the tiling
+machinery works; what it cannot do is invent structure:
 
-    metric       real r.3.3   hybrid
-    relief           261        257
-    slope p50       0.71       0.93
-    slope p90       1.50       1.74
-    ridge           1.18       0.25
-    hollow          8.03       6.78
-    footslope       1.62       2.29
-    valley          0.32       0.03
+    layout        relief  slope50  ridge  hollow  footslope
+    reference       261    0.71    1.18    8.03     1.62
+    fBm + tiles     197    1.05    0.02   10.22     4.21
 
-Hollow and footslope, the two classes the analytic model could not reach at all, are now close.
+The fBm layout has no ridges and no valleys, so the residual dominates and the result reads as noise.
+The analytic layout has structure but carries creases.
 
-The picture shows the remaining problem: the 48-block lattice is visible as straight seams. Grid
-quilting without the overlap search that makes Efros-Freeman seamless produces exactly this. The next
-step is either a proper greedy quilting pass computed offline into one large tileable field (the mod
-then samples that field with a per-region offset, so no runtime search and no seams), or
-gradient-domain blending over a wider feather.
+Conclusion: the missing piece is a layout generator that is structured and crease-free. That is a much
+smaller problem than the whole terrain -- it only needs a 128x128 or 256x256 field, where a small
+generative model is cheap to train and to sample -- and the tiled residual then supplies the texture.
