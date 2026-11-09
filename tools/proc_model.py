@@ -79,6 +79,7 @@ def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
     peaks_list = []
     basins_list = []
     max_prof = np.zeros_like(X)
+    toe_sum = np.zeros_like(X)
 
     for dx in (-1, 0, 1):
         for dz in (-1, 0, 1):
@@ -118,7 +119,12 @@ def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
             wx, wz = X - (jx - hx), Z - (jz - hz)
             t = np.clip((wx * vx + wz * vz) / np.maximum(vx * vx + vz * vz, 1e-6), 0, 1)
             d = np.hypot(wx - t * vx, wz - t * vz)
-            prof = np.power(np.clip(1.0 - d / np.maximum(r, 1.0), 0, 1), np.maximum(gamma, 0.2))
+            pprof = np.clip(1.0 - d / np.maximum(r, 1.0), 0, 1)
+            prof = np.power(pprof, np.maximum(gamma, 0.2))
+            # concave collar at the base of the slope: this is the footslope the model lacked.
+            # p->0 at the rim, so the term digs a ring below the base level instead of stopping flat.
+            if P.get("toeDepth", 0.0):
+                toe_sum += np.abs(amp) * P["toeDepth"] * P.get("toePow", 1.5) * 0 +                     np.where(sign > 0, amp * P["toeDepth"] * np.power(1.0 - pprof, P.get("toePow", 1.5)), 0.0)
             contrib = sign * amp * prof * region
             if np.all(sign >= 0):
                 peaks_list.append(np.where(sign > 0, contrib, 0.0))
@@ -140,7 +146,7 @@ def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
     else:
         peaks = np.zeros_like(X)
     basins = np.sum(basins_list, axis=0) if basins_list else np.zeros_like(X)
-    h = P["base"] + peaks - basins
+    h = P["base"] + peaks - basins - toe_sum * region
 
     # concave pockets on the flanks: strongest where the profile is mid-range
     hollow_amp = P.get("hollowAmp", 0.0)
@@ -148,6 +154,28 @@ def generate(P: dict, x0: int, z0: int, size: int) -> np.ndarray:
         flank = 4.0 * max_prof * (1.0 - max_prof)
         n = noise2(X, Z, P.get("hollowFreq", 6.0) / 512.0, 4242, 2) * 0.5 + 0.5
         h -= hollow_amp * flank * (n ** 2) * (0.3 + 0.7 * region)
+
+    # valley network: long concave troughs between the ridges. Their flanks are the footslopes and
+    # their heads are the hollows the reference has and isolated landforms cannot produce.
+    if P.get("valleyDepth", 0.0):
+        vd = P["valleyDepth"]; vw = max(P.get("valleyWidth", 60.0), 8.0)
+        vcell = float(P.get("valleyCell", 420.0))
+        vx = np.floor(X / vcell).astype(np.int64); vz = np.floor(Z / vcell).astype(np.int64)
+        trough = np.zeros_like(X)
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                ix, iz = vx + dx, vz + dz
+                jx = (ix + cell_rand(ix, iz, P["seed"] + 91, 2)) * vcell
+                jz = (iz + cell_rand(ix, iz, P["seed"] + 91, 3)) * vcell
+                ang = cell_rand(ix, iz, P["seed"] + 91, 6) * math.pi
+                ln = vcell * (1.2 + 1.8 * cell_rand(ix, iz, P["seed"] + 91, 8))
+                hx, hz = np.cos(ang) * ln * 0.5, np.sin(ang) * ln * 0.5
+                wx, wz = X - (jx - hx), Z - (jz - hz)
+                vxx, vzz = 2 * hx, 2 * hz
+                t = np.clip((wx * vxx + wz * vzz) / np.maximum(vxx * vxx + vzz * vzz, 1e-6), 0, 1)
+                dd = np.hypot(wx - t * vxx, wz - t * vzz)
+                trough = np.maximum(trough, np.exp(-(dd / vw) ** 2))
+        h -= vd * trough * region
 
     if P.get("midAmp"):
         h += P["midAmp"] * noise2(X, Z, P["midFreq"] / 512.0, 777, 2) * (0.4 + 0.6 * region)
@@ -168,6 +196,8 @@ DEFAULTS = {
     "regionFreq": 1.2, "regionThreshold": -0.15, "regionSoftness": 0.25,
     "midAmp": 10.0, "midFreq": 3.4, "detailAmp": 5.0, "detailFreq": 22.0, "detailOctaves": 3,
     "smoothUnionK": 0.0, "hollowAmp": 0.0, "hollowFreq": 6.0,
+    "toeDepth": 0.0, "toePow": 1.5,
+    "valleyDepth": 0.0, "valleyWidth": 60.0, "valleyCell": 420.0,
     "scale": 0.45, "offset": 48.0,
 }
 

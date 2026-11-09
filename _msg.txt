@@ -1,31 +1,24 @@
-Held-out test: a spatial style partition cannot be justified
+Mechanism tests: the analytic landform model has a ceiling, and it is below the reference
 
-Question: the generator must decide, at a position it was never fitted on, what the terrain should
-look like there. The reference map has 16 regions with strongly varying statistics (ridge 0.39-6.06,
-hollow 2.99-11.78). Is that variation predictable from position -- and therefore worth modelling with
-provinces or a continuous style field?
+Three mechanisms were added to the Python mirror and swept against the reference's landform
+distribution (ridge 0.39-6.06, hollow 2.99-11.78, footslope 0.50-2.84 across 16 regions):
 
-tools/holdout_check.py fits three position -> statistics structures on half the regions and predicts
-the other half (60 random 8/8 splits). Error is normalised by the map's own std, so 1.0 means "no
-better than always predicting the mean":
+    mechanism                  ridge        hollow       footslope
+    smooth union (k up to .25)  0.93 -> 0.35  4.75 -> 6.47  0.77 -> 0.63
+    toe collar (depth .35)      0.14          2.49 -> 4.33  0.16 -> 0.74
+    valley troughs (depth 40)   0.00          2.52 -> 4.11  0.13 -> 0.04
 
-    structure    MAE    median   p90    vs global
-    global      0.836   0.838   0.955   baseline
-    provinces   0.888   0.898   1.038   -6%
-    field       0.818   0.806   0.936   +2%
+Every mechanism moves one class at the cost of another, because ridge, hollow and footslope are all
+driven by the same few geometric parameters (profile exponent, radius, composition). Forcing the
+footslope up with a toe collar collapses the ridge class; carving valleys raises hollow and removes
+footslope entirely. The reachable envelope stays around hollow <= 5.5 and footslope <= 0.75, against a
+reference that reaches 11.78 and 2.84.
 
-Spatially separated split (train the top two rows, test the bottom two):
+That is the answer to "what model can this map support": not a parameterised landform model. The map's
+landform classes are jointly distributed, and a five-parameter geometric generator cannot move in that
+joint space -- it only moves along one axis at a time.
 
-    global 0.928   provinces 1.083   field 0.984
-
-Conclusions:
-1. The regional variation of this map is essentially unpredictable from position: the best structure
-   beats "always predict the mean" by 2%, and it loses that advantage on a separated split.
-2. The discrete-province design -- the one that looked most promising -- is the *worst*, both for
-   transferability and for prediction. Dropped.
-3. So the variation is not a spatial pattern to be reproduced; it is variation to be matched in
-   distribution. The generator should draw its regional parameter set from the measured distribution
-   (ridge 0.4-6, hollow 3-12, relief 151-340) instead of trying to place provinces on the map.
-
-That is also the more transferable design: a new map needs its 16 regional measurements, not a fit of
-where its provinces are.
+A patch-based model has no such coupling: it reproduces the joint distribution by construction because
+the patches are samples of it. That is the model the map's ~4 million heights actually support, and the
+acceptance test is ready for it: synthesise a region held out of the database and compare landform
+distribution, slope percentiles and relief against the real region.
