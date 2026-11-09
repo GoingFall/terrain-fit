@@ -1,24 +1,33 @@
-Mechanism tests: the analytic landform model has a ceiling, and it is below the reference
+First patch-synthesis prototype: numbers are close, seams are not
 
-Three mechanisms were added to the Python mirror and swept against the reference's landform
-distribution (ridge 0.39-6.06, hollow 2.99-11.78, footslope 0.50-2.84 across 16 regions):
+tools/patch_synth.py builds a patch database from 15 of the reference's 16 regions, holds out r.3.3,
+and synthesises a 512x512 terrain there. Quilting is on a fixed lattice with hash-chosen patches, so
+it is deterministic and needs no search at runtime.
 
-    mechanism                  ridge        hollow       footslope
-    smooth union (k up to .25)  0.93 -> 0.35  4.75 -> 6.47  0.77 -> 0.63
-    toe collar (depth .35)      0.14          2.49 -> 4.33  0.16 -> 0.74
-    valley troughs (depth 40)   0.00          2.52 -> 4.11  0.13 -> 0.04
+Two findings on the way:
+1. Blending raw patches produces a false gradient of (h_i - h_j)/cell wherever four patches meet:
+   slope p50 came out 1.73 against the reference's 0.71. Splitting each patch into a large-scale level
+   and a high-frequency detail fixed it (0.93).
+2. Patch synthesis alone cannot invent relief. With the level field taken from the patches the
+   synthesised terrain had relief 101 blocks against the reference's 261; the map's relief lives in the
+   arrangement of its landforms, not in their local texture.
 
-Every mechanism moves one class at the cost of another, because ridge, hollow and footslope are all
-driven by the same few geometric parameters (profile exponent, radius, composition). Forcing the
-footslope up with a toe collar collapses the ridge class; carving valleys raises hollow and removes
-footslope entirely. The reachable envelope stays around hollow <= 5.5 and footslope <= 0.75, against a
-reference that reaches 11.78 and 2.84.
+So the prototype is a hybrid: the analytic generator supplies the large-scale layout, the patches
+supply the local texture. Held-out comparison against the real r.3.3:
 
-That is the answer to "what model can this map support": not a parameterised landform model. The map's
-landform classes are jointly distributed, and a five-parameter geometric generator cannot move in that
-joint space -- it only moves along one axis at a time.
+    metric       real r.3.3   hybrid
+    relief           261        257
+    slope p50       0.71       0.93
+    slope p90       1.50       1.74
+    ridge           1.18       0.25
+    hollow          8.03       6.78
+    footslope       1.62       2.29
+    valley          0.32       0.03
 
-A patch-based model has no such coupling: it reproduces the joint distribution by construction because
-the patches are samples of it. That is the model the map's ~4 million heights actually support, and the
-acceptance test is ready for it: synthesise a region held out of the database and compare landform
-distribution, slope percentiles and relief against the real region.
+Hollow and footslope, the two classes the analytic model could not reach at all, are now close.
+
+The picture shows the remaining problem: the 48-block lattice is visible as straight seams. Grid
+quilting without the overlap search that makes Efros-Freeman seamless produces exactly this. The next
+step is either a proper greedy quilting pass computed offline into one large tileable field (the mod
+then samples that field with a per-region offset, so no runtime search and no seams), or
+gradient-domain blending over a wider feather.
