@@ -1,29 +1,23 @@
-Tiled residual: the tiling is clean, the layout is the bottleneck
+Timing a layout diffusion model: 8 minutes is not enough, and the numbers say why
 
-tools/tile_synth.py implements the infinite-friendly scheme: a layout function plus a pool of
-high-frequency residual tiles selected by hash and combined by normalised overlap-add (Hann windows at
-50% hop, so the weights sum to exactly 1.000 everywhere -- verified).
+tools/train_layout_diffusion.py trains a 0.24M parameter DDPM on 64x64 crops of the reference map
+downsampled 4x (400 crops). Measured on this machine, CPU only:
 
-Three defects were found and fixed while chasing visible straight lines:
-1. each tile's residual had a non-zero mean, which is a constant offset per tile and shows as a faint
-   rectangular step; the windowed mean is now removed per tile.
-2. contrast normalisation over a small window clipped at its limit and produced its own bright lines;
-   the clip is now conservative.
-3. neither of those was the real cause. The lines sit at columns 63/223/383, spaced 160 = the analytic
-   layout's cellSize, and the layout alone reproduces them with a max/median gradient ratio of 9.84.
-   They are the cone creases of the analytic generator, the same defect identified several rounds ago
-   and never fixed.
+    steps/second          4.8      (32 threads, batch 16)
+    8 minute run          2293 steps, loss 0.0128
+    sampling              0.67 s per 64x64 tile -> 2.9 min for a 512x512 field
 
-With a crease-free fBm layout the spikes collapse to a ratio of 1.41, i.e. within noise. So the tiling
-machinery works; what it cannot do is invent structure:
+The samples after 8 minutes are grey blobs: the model has learned the marginal height distribution and
+nothing else. Too few steps for this architecture, not a bug.
 
-    layout        relief  slope50  ridge  hollow  footslope
-    reference       261    0.71    1.18    8.03     1.62
-    fBm + tiles     197    1.05    0.02   10.22     4.21
+Extrapolating the cost of a usable model:
 
-The fBm layout has no ridges and no valleys, so the residual dominates and the result reads as noise.
-The analytic layout has structure but carries creases.
+    budget            steps    expected state
+    8 min             2.3k     marginal distribution only
+    1 hour            17k      coarse structure appearing
+    4 hours           69k      plausible layouts
+    1 day             400k     diminishing returns
 
-Conclusion: the missing piece is a layout generator that is structured and crease-free. That is a much
-smaller problem than the whole terrain -- it only needs a 128x128 or 256x256 field, where a small
-generative model is cheap to train and to sample -- and the tiled residual then supplies the texture.
+So training a layout model on CPU is an overnight job, not an afternoon one. The GPU is idle because
+the installed torch is the CPU build; an RTX 5070 would need torch built for CUDA 12.8 (Blackwell),
+about a 2.5 GB download, and would plausibly cut the step time by one to two orders of magnitude.
