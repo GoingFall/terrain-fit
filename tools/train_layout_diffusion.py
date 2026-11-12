@@ -106,6 +106,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--world", default="G:/HMCL/.minecraft/versions/1.20.1-Liminalism/saves/静谧山谷-拉斐丽")
     ap.add_argument("--crop", type=int, default=64)
+    ap.add_argument("--downsample", type=int, default=4)
+    ap.add_argument("--stride", type=int, default=16)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--steps", type=int, default=0, help="0 = run for --minutes")
     ap.add_argument("--minutes", type=float, default=8.0)
@@ -123,8 +125,9 @@ def main() -> int:
         torch.set_num_threads(32)
     print(f"device: {dev}" + (f" ({torch.cuda.get_device_name(0)})" if dev.type == "cuda" else ""))
     t0 = time.time()
-    data, lo, hi = build_crops(Path(args.world), args.crop)
-    print(f"crops: {data.shape}  (heights {lo:.0f}..{hi:.0f})  built in {time.time()-t0:.1f}s")
+    data, lo, hi = build_crops(Path(args.world), args.crop, stride=args.stride, downsample=args.downsample)
+    print(f"crops: {data.shape} at {args.downsample}x downsample "
+          f"({args.crop*args.downsample} blocks wide)  built in {time.time()-t0:.1f}s", flush=True)
     X = torch.from_numpy(data).unsqueeze(1).to(dev)
 
     model = TinyUNet().to(dev)

@@ -1,26 +1,22 @@
-Training cost measured on the local GPU; the bottleneck turned out not to be time
+2x training run: 88.9k steps in 40 minutes, but samples still collapse toward the mean
 
-A CUDA build of torch was already installed in five conda environments (all see the RTX 5070 as
-sm_120 / CUDA 12.8), so nothing had to be installed. Using medical_report (torch 2.10.0+cu128):
+Retrained at 2x downsampling (64x64 crops covering 128 blocks, 9928 crops) after the 4x data turned out
+to be featureless. On the GPU: 88,860 steps in 2400 s, loss 0.0060 (against 0.0101 at 4x, which is the
+expected direction: more structure in the data).
 
-    training      CPU 4.8 steps/s   GPU 70 steps/s   (14.6x)
-    12k steps     --                222 s
-    33.5k steps   --                480 s   (the run is capped by --minutes, default 8)
-    100k steps    --                ~25 min
-    500k steps    --                ~2 h
+Comparing samples with real crops at the same scale (preview/images/layout_2x_vs_real.png):
 
-Sampling is *slower* on the GPU (2.0 s per 64x64 tile against 0.67 s on CPU): the tile is too small
-for 200 sequential kernel launches to amortise.
+    sampled tile std   0.06 - 0.13
+    real crop std      0.09 - 0.13
 
-Quality at 12k and at 33.5k steps is the same - smooth blobs, with a per-tile std of 0.09-0.15 against
-0.198 in the training data. The model is averaging toward the mean, which is what an undertrained
-diffusion model looks like.
+and visually the samples have the right kind of mottling but none of the slope faces: the real crops
+show large coherent gradients, the samples are flatter and rounder.
 
-But the more useful finding is about the data rather than the model: at 4x downsampling the *training
-crops themselves* are smooth blobs with only a few terraced edges (see preview/images/layout_real_crops.png).
-So a model that reproduces them faithfully would produce blobs too. 4x downsampling is too coarse to be
-where the interesting structure lives; the ridges and valleys are at 1x-2x.
+Diagnosis: the per-crop variance is small compared with the unit-variance noise the model is trained to
+predict. In [-1, 1] space a crop has std about 0.1, so the optimal epsilon prediction is dominated by
+zero -- predicting "noise" is easy and collapses toward the mean. Two standard remedies:
+  * standardise each crop (subtract its own mean, divide by its own std) and supply the global level and
+    relief from a separate low-frequency field, so the model only has to learn shape
+  * predict v instead of epsilon, which behaves better when the data range is narrow
 
-Conclusion: the cost of training is not the obstacle (minutes, not days). The open question is whether a
-learned layout is needed at all at this scale, or whether a non-parametric low-frequency sampler would
-do the same job for zero training.
+Both are small changes to the training script, and at 40 minutes per run they are cheap to test.
