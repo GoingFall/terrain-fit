@@ -1,23 +1,26 @@
-Timing a layout diffusion model: 8 minutes is not enough, and the numbers say why
+Training cost measured on the local GPU; the bottleneck turned out not to be time
 
-tools/train_layout_diffusion.py trains a 0.24M parameter DDPM on 64x64 crops of the reference map
-downsampled 4x (400 crops). Measured on this machine, CPU only:
+A CUDA build of torch was already installed in five conda environments (all see the RTX 5070 as
+sm_120 / CUDA 12.8), so nothing had to be installed. Using medical_report (torch 2.10.0+cu128):
 
-    steps/second          4.8      (32 threads, batch 16)
-    8 minute run          2293 steps, loss 0.0128
-    sampling              0.67 s per 64x64 tile -> 2.9 min for a 512x512 field
+    training      CPU 4.8 steps/s   GPU 70 steps/s   (14.6x)
+    12k steps     --                222 s
+    33.5k steps   --                480 s   (the run is capped by --minutes, default 8)
+    100k steps    --                ~25 min
+    500k steps    --                ~2 h
 
-The samples after 8 minutes are grey blobs: the model has learned the marginal height distribution and
-nothing else. Too few steps for this architecture, not a bug.
+Sampling is *slower* on the GPU (2.0 s per 64x64 tile against 0.67 s on CPU): the tile is too small
+for 200 sequential kernel launches to amortise.
 
-Extrapolating the cost of a usable model:
+Quality at 12k and at 33.5k steps is the same - smooth blobs, with a per-tile std of 0.09-0.15 against
+0.198 in the training data. The model is averaging toward the mean, which is what an undertrained
+diffusion model looks like.
 
-    budget            steps    expected state
-    8 min             2.3k     marginal distribution only
-    1 hour            17k      coarse structure appearing
-    4 hours           69k      plausible layouts
-    1 day             400k     diminishing returns
+But the more useful finding is about the data rather than the model: at 4x downsampling the *training
+crops themselves* are smooth blobs with only a few terraced edges (see preview/images/layout_real_crops.png).
+So a model that reproduces them faithfully would produce blobs too. 4x downsampling is too coarse to be
+where the interesting structure lives; the ridges and valleys are at 1x-2x.
 
-So training a layout model on CPU is an overnight job, not an afternoon one. The GPU is idle because
-the installed torch is the CPU build; an RTX 5070 would need torch built for CUDA 12.8 (Blackwell),
-about a 2.5 GB download, and would plausibly cut the step time by one to two orders of magnitude.
+Conclusion: the cost of training is not the obstacle (minutes, not days). The open question is whether a
+learned layout is needed at all at this scale, or whether a non-parametric low-frequency sampler would
+do the same job for zero training.

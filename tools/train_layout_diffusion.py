@@ -111,22 +111,37 @@ def main() -> int:
     ap.add_argument("--minutes", type=float, default=8.0)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--smoke", action="store_true", help="measure step time only")
+    ap.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
+    ap.add_argument("--no-sample", action="store_true")
+    ap.add_argument("--log", default="")
     ap.add_argument("--out", default="preview/fits/layout_ddpm.pt")
     args = ap.parse_args()
 
-    torch.set_num_threads(32)
+    dev = torch.device("cuda" if (args.device == "cuda" or
+                                 (args.device == "auto" and torch.cuda.is_available())) else "cpu")
+    if dev.type == "cpu":
+        torch.set_num_threads(32)
+    print(f"device: {dev}" + (f" ({torch.cuda.get_device_name(0)})" if dev.type == "cuda" else ""))
     t0 = time.time()
     data, lo, hi = build_crops(Path(args.world), args.crop)
     print(f"crops: {data.shape}  (heights {lo:.0f}..{hi:.0f})  built in {time.time()-t0:.1f}s")
-    X = torch.from_numpy(data).unsqueeze(1)
+    X = torch.from_numpy(data).unsqueeze(1).to(dev)
 
-    model = TinyUNet()
+    model = TinyUNet().to(dev)
     nparam = sum(p.numel() for p in model.parameters())
     print(f"model: {nparam/1e6:.2f}M parameters")
 
-    betas = beta_schedule(200)
+    betas = beta_schedule(200).to(dev)
     abar = torch.cumprod(1 - betas, dim=0)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    logf = open(args.log, "a", encoding="utf-8") if args.log else None
+
+    def say(msg):
+        print(msg, flush=True)
+        if logf:
+            logf.write(msg + "\n")
+            logf.flush()
 
     n = len(X)
     step = 0
@@ -134,9 +149,9 @@ def main() -> int:
     t_last = t_start
     losses = []
     while True:
-        idx = torch.randint(0, n, (min(args.batch, n),))
+        idx = torch.randint(0, n, (min(args.batch, n),), device=dev)
         x0 = X[idx]
-        t = torch.randint(0, len(betas), (len(idx),))
+        t = torch.randint(0, len(betas), (len(idx),), device=dev)
         noise = torch.randn_like(x0)
         a = abar[t][:, None, None, None]
         xt = a.sqrt() * x0 + (1 - a).sqrt() * noise
@@ -152,8 +167,8 @@ def main() -> int:
             now = time.time()
             rate = 20 / (now - t_last)
             t_last = now
-            print(f"  step {step:5d}  loss {np.mean(losses[-20:]):.4f}  "
-                  f"{rate:.1f} steps/s  elapsed {now-t_start:.0f}s")
+            say(f"  step {step:5d}  loss {np.mean(losses[-20:]):.4f}  "
+                f"{rate:.1f} steps/s  elapsed {now-t_start:.0f}s")
         if args.smoke and step >= 100:
             break
         if args.steps and step >= args.steps:
@@ -169,16 +184,18 @@ def main() -> int:
 
         # sample
         model.eval()
+        if args.no_sample:
+            return 0
         with torch.no_grad():
-            x = torch.randn(4, 1, args.crop, args.crop)
+            x = torch.randn(4, 1, args.crop, args.crop, device=dev)
             for i in reversed(range(len(betas))):
-                tt = torch.full((4,), float(i))
+                tt = torch.full((4,), float(i), device=dev)
                 eps = model(x, tt)
                 a, b = abar[i], betas[i]
                 x = (x - b / (1 - a).sqrt() * eps) / (1 - b).sqrt()
                 if i > 0:
                     x = x + b.sqrt() * torch.randn_like(x)
-        s = x[:, 0].numpy()
+        s = x[:, 0].cpu().numpy()
         from PIL import Image
         grid = np.concatenate([np.concatenate([s[0], s[1]], axis=1),
                                np.concatenate([s[2], s[3]], axis=1)], axis=0)
